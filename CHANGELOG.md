@@ -1,5 +1,15 @@
 # Changes
 
+## 0.1.0-preview.3
+
+Welcome has tighter panel padding and spacing between its heading and three
+choices, including at narrow widths. Text sizes, wording, keyboard focus,
+entry paths and the existing style remain the same. The Res logo is unchanged.
+The app shell refreshes its cached stylesheet.
+
+This is a presentation update. Account checks still require an external
+assistant; the automatic browser reader remains unfinished.
+
 ## 0.1.0-preview.2
 
 Finding cards have clearer borders and raised backgrounds in every palette.
