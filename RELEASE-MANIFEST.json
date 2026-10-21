@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0-preview.1",
+  "version": "0.1.0-preview.2",
   "files": {
     ".claude/skills/resonance/SKILL.md": {
       "sha256": "b1c1c2873848e7b90a4357ffc4b9c2ff7463723ceec0373e52a42bb5d619af30",
@@ -22,8 +22,8 @@
       "bytes": 33667
     },
     "CHANGELOG.md": {
-      "sha256": "a2cc25cce04dd604bf43b90319963b192d16369e18dac67d4c7d1da1ab62294b",
-      "bytes": 1475
+      "sha256": "b7a8ab8c52e4a427930f50530bc79f894b2a534727d75f5d95713655dd0d9670",
+      "bytes": 1971
     },
     "INTEGRATIONS.md": {
       "sha256": "7682bce089e9f9057cf019606e4268d15732300e3b115522d0c180ec2b8afde2",
@@ -38,7 +38,7 @@
       "bytes": 7375
     },
     "README.md": {
-      "sha256": "7563dfebcbb8fc266b2385ba23a991621b3b4bb9bcfe936e82795f6d83b65ccd",
+      "sha256": "ffd1f096ff9444ce00826724716430feb4bb0cfe0819d6e972e9a9b5a13f003c",
       "bytes": 8421
     },
     "SECURITY.md": {
@@ -46,7 +46,7 @@
       "bytes": 5901
     },
     "VERSION": {
-      "sha256": "b52d8845641f926c4f177b373c8296662b75f5a3f7f6053ee4c13ab6801180c8",
+      "sha256": "efdd0f34e6cf518a11a700ba7bef68869236c8caaadf1e1e4f647b6f8ec47eca",
       "bytes": 16
     },
     "docs/ACTIONS.md": {
@@ -142,11 +142,11 @@
       "bytes": 423
     },
     "static/styles.css": {
-      "sha256": "66f93df24841d0aa6f2500a735172d55394fb4363016679f58547acfa7224434",
-      "bytes": 107161
+      "sha256": "ffc244fee9bcf736d5156c53eb34aff038f404b8498af0dfe6c6a4bc7631d1d5",
+      "bytes": 108315
     },
     "static/sw.js": {
-      "sha256": "d7ebbf6832110f318c7d82888ddcb53d95956870a43e94e83a6b72bef7b0c74e",
+      "sha256": "19181f22fc87add06e4b4e9912ae458cacf4fae2354ef243184d590d9ea478c8",
       "bytes": 1519
     },
     "tests/test_actions.py": {
@@ -222,7 +222,7 @@
       "bytes": 13006
     },
     "tests/test_ui_today.cjs": {
-      "sha256": "42fe27bc516215c1e89df402e2f350ab549c9049ba46511f735f4ca30238edde",
+      "sha256": "5bb60c8fd4f9236afce772d62e03e99c43044339feda7b41cfed3766fd022283",
       "bytes": 21577
     },
     "tools/make_release.py": {

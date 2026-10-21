@@ -1,5 +1,16 @@
 # Changes
 
+## 0.1.0-preview.2
+
+Finding cards have clearer borders and raised backgrounds in every palette.
+Finding text is easier to read, and wording, source and context links stay
+underlined with stronger keyboard-focus and hover emphasis. Selected findings
+retain their existing highlight. The app shell refreshes its cached stylesheet.
+
+The Res logo is unchanged. This is a presentation update: review behavior,
+context evidence and the source preview's external-assistant requirement remain
+the same.
+
 ## 0.1.0-preview.1
 
 First source preview. Runs locally with synthetic practice posts, text checks,

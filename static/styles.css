@@ -320,3 +320,18 @@ main{max-width:1680px;padding:22px 24px 32px}.workspace-footer{max-width:1680px;
 .context-observation figure{margin:12px 0 0}.context-observation img{display:block;max-width:100%;width:auto;max-height:280px;object-fit:contain;background:var(--panel);border:1px solid var(--line)}
 .context-observation figcaption,.context-media-note,.context-missing{font-size:12px!important;color:var(--dim);line-height:1.6;margin-top:8px}
 .context-footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;font-size:11px;color:var(--dim)}
+
+/* Clear finding boundaries and recognizable links, within each existing palette. */
+@media screen{
+  :root{--finding-border:#72858f}
+  :root[data-theme=light]{--finding-border:#677b75}
+  :root[data-theme=phosphor]{--finding-border:#627f6a}
+  :root[data-theme=midnight]{--finding-border:#6d83a8}
+  .draft-signal,.source-finding{background:var(--panel-raised);border-color:var(--finding-border);border-left-width:3px}
+  .draft-signal,.source-finding p{font-size:13px}
+  .draft-signal strong{font-size:13px;font-weight:650}
+  .draft-signal:hover,.draft-signal:focus-visible{background:var(--blue-bg);border-color:var(--blue)}
+  .finding-chip{border-color:var(--finding-border);font-size:13px;font-weight:600}
+  .draft-signal .signal-jump,.source-link,.check-finding .source-link,.context-footer .text-button{font-size:13px;font-weight:600;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
+  .draft-signal:hover .signal-jump,.draft-signal:focus-visible .signal-jump,.source-link:hover,.source-link:focus-visible,.context-footer .text-button:hover,.context-footer .text-button:focus-visible{text-decoration-thickness:2px}
+}
