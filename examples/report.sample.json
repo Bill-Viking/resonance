@@ -1,0 +1,60 @@
+{
+  "id": "check-20261001-180000",
+  "started_at": "2026-10-01T18:00:00Z",
+  "completed_at": "2026-10-01T18:09:30Z",
+  "summary": "Two accounts. One read in part: three things to look at. One could not be read: signed out.",
+  "accounts": [
+    {
+      "account_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "status": "partial",
+      "checked_at": "2026-10-01T18:04:10Z",
+      "summary": "Fourteen posts and replies since the last check. One may land badly; one worked well.",
+      "coverage": "All posts and replies since 2026-09-30, signed in as this account. The replies tab stopped loading after about two weeks. Images were not inspected.",
+      "items_reviewed": 14,
+      "deleted_count": 0,
+      "pending_deletion_count": 0,
+      "findings": [
+        {
+          "severity": "suggestion",
+          "kind": "reply",
+          "title": "Insult aimed at a group",
+          "detail": "Under your real name, calling people idiots who deserve an outage can read as contempt rather than a joke, especially to colleagues who see it without the thread. The point about Friday releases stands without it.",
+          "source_url": "https://social.example/river_example/status/1001",
+          "text": "Honestly, anyone still shipping on Fridays is an idiot and deserves the outage. Do better.",
+          "quotes": [
+            "is an idiot and deserves the outage"
+          ]
+        },
+        {
+          "severity": "strength",
+          "kind": "post",
+          "title": "Generous, specific help",
+          "detail": "You shared a hard-won fix without showing off. This is the voice you said you want: useful first.",
+          "source_url": "https://social.example/river_example/status/1002",
+          "text": "Took me three tries to get the migration right. Here is what finally worked, in case it saves you an evening.",
+          "quotes": [
+            "in case it saves you an evening"
+          ]
+        },
+        {
+          "severity": "suggestion",
+          "kind": "account",
+          "title": "Older replies could not be read",
+          "detail": "The replies tab stopped loading, so replies older than about two weeks were not checked this time.",
+          "source_url": "https://social.example/river_example"
+        }
+      ]
+    },
+    {
+      "account_id": "0f9e8d7c6b5a41322314a5b6c7d8e9f0",
+      "status": "blocked",
+      "checked_at": null,
+      "summary": "Not read. The browser is signed out of this account.",
+      "coverage": "Nothing was read. Sign in to this account in your browser and I will read it on the next check.",
+      "items_reviewed": 0,
+      "deleted_count": 0,
+      "pending_deletion_count": 0,
+      "findings": []
+    }
+  ]
+}

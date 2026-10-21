@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "account": {
+    "id": "resonance-sample-account",
+    "platform": "YouTube",
+    "handle": "resonance_sample",
+    "display_name": "Sample account",
+    "url": "https://www.youtube.com/@resonance_sample",
+    "access_checked_at": null,
+    "access_note": "",
+    "created_at": "2026-01-02T12:00:00Z",
+    "identity_mode": "alias",
+    "daring": "balanced",
+    "sfw_only": true
+  },
+  "posts": [
+    {
+      "state": "needs_you",
+      "review": {
+        "id": "resonance-sample-needs_you",
+        "account_id": "resonance-sample-account",
+        "kind": "comment",
+        "title": "A reply to reconsider",
+        "excerpt": "Only an idiot would call this ready.",
+        "source_url": "https://www.youtube.com/watch?v=resonance-sample&lc=resonance-sample-needs_you",
+        "observed_at": "2026-01-02T12:00:00Z",
+        "reviewed_at": "2026-01-02T12:00:00Z",
+        "sample_count": 1,
+        "severity": "suggestion",
+        "finding": "The personal jab may overshadow your point.",
+        "suggestion": "Practice Keep, Modify, Delete or Snooze on this sample.",
+        "origin": "manual",
+        "status": "open",
+        "snoozed_until": null,
+        "updated_at": "2026-01-02T12:00:00Z"
+      }
+    },
+    {
+      "state": "waiting",
+      "review": {
+        "id": "resonance-sample-waiting",
+        "account_id": "resonance-sample-account",
+        "kind": "comment",
+        "title": "A request waiting for your assistant",
+        "excerpt": "This is the worst update ever. Nobody asked for this.",
+        "source_url": "https://www.youtube.com/watch?v=resonance-sample&lc=resonance-sample-waiting",
+        "observed_at": "2026-01-02T12:00:00Z",
+        "reviewed_at": "2026-01-02T12:00:00Z",
+        "sample_count": 1,
+        "severity": "suggestion",
+        "finding": "The absolute wording may hide the specific problem.",
+        "suggestion": "Practice Keep, Modify, Delete or Snooze on this sample.",
+        "origin": "manual",
+        "status": "open",
+        "snoozed_until": null,
+        "updated_at": "2026-01-02T12:00:00Z"
+      }
+    },
+    {
+      "state": "blocked",
+      "review": {
+        "id": "resonance-sample-blocked",
+        "account_id": "resonance-sample-account",
+        "kind": "comment",
+        "title": "A sample that needs a sign-in",
+        "excerpt": "Everyone on that team is clueless.",
+        "source_url": "https://www.youtube.com/watch?v=resonance-sample&lc=resonance-sample-blocked",
+        "observed_at": "2026-01-02T12:00:00Z",
+        "reviewed_at": "2026-01-02T12:00:00Z",
+        "sample_count": 1,
+        "severity": "suggestion",
+        "finding": "The broad criticism may read as a personal attack.",
+        "suggestion": "Practice Keep, Modify, Delete or Snooze on this sample.",
+        "origin": "manual",
+        "status": "open",
+        "snoozed_until": null,
+        "updated_at": "2026-01-02T12:00:00Z"
+      },
+      "reason": "The sample account needs a new sign-in before the assistant can open the original."
+    },
+    {
+      "state": "verified",
+      "review": {
+        "id": "resonance-sample-verified",
+        "account_id": "resonance-sample-account",
+        "kind": "comment",
+        "title": "A removal with a checked result",
+        "excerpt": "There is no excuse for such a useless launch.",
+        "source_url": "https://www.youtube.com/watch?v=resonance-sample&lc=resonance-sample-verified",
+        "observed_at": "2026-01-02T12:00:00Z",
+        "reviewed_at": "2026-01-02T12:00:00Z",
+        "sample_count": 1,
+        "severity": "suggestion",
+        "finding": "The criticism could be more specific.",
+        "suggestion": "Practice Keep, Modify, Delete or Snooze on this sample.",
+        "origin": "manual",
+        "status": "open",
+        "snoozed_until": null,
+        "updated_at": "2026-01-02T12:00:00Z"
+      }
+    },
+    {
+      "state": "kept",
+      "review": {
+        "id": "resonance-sample-kept",
+        "account_id": "resonance-sample-account",
+        "kind": "comment",
+        "title": "A post you chose to keep",
+        "excerpt": "The new layout takes longer for me to use.",
+        "source_url": "https://www.youtube.com/watch?v=resonance-sample&lc=resonance-sample-kept",
+        "observed_at": "2026-01-02T12:00:00Z",
+        "reviewed_at": "2026-01-02T12:00:00Z",
+        "sample_count": 1,
+        "severity": "suggestion",
+        "finding": "This is a clear account of your experience.",
+        "suggestion": "Practice Keep, Modify, Delete or Snooze on this sample.",
+        "origin": "manual",
+        "status": "open",
+        "snoozed_until": null,
+        "updated_at": "2026-01-02T12:00:00Z"
+      }
+    }
+  ]
+}

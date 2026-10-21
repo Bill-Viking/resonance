@@ -1,0 +1,63 @@
+{
+  "id": "check-context-example",
+  "started_at": "2026-10-01T18:00:00Z",
+  "completed_at": "2026-10-01T18:09:30Z",
+  "summary": "Synthetic context-card example; no real account or media.",
+  "accounts": [
+    {
+      "account_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "status": "partial",
+      "checked_at": "2026-10-01T18:04:10Z",
+      "summary": "Fourteen posts and replies since the last check. One may land badly; one worked well.",
+      "coverage": "Synthetic context fixture only. No platform was accessed; no video was played.",
+      "items_reviewed": 1,
+      "deleted_count": 0,
+      "pending_deletion_count": 0,
+      "findings": [
+        {
+          "severity": "suggestion",
+          "kind": "reply",
+          "title": "Read this reply with its parent image",
+          "detail": "The meaning of this short reply depends on the abstract diagram above it. Inspect the context before deciding whether to change the words.",
+          "source_url": "https://example.test/comments/context-1",
+          "text": "Interesting shape.",
+          "quotes": [
+            "shape"
+          ],
+          "context": [
+            {
+              "kind": "parent_media",
+              "inspection": "inspected",
+              "source_url": "https://social.example/posts/parent-1",
+              "summary": "A blue circle sits beside two orange rectangles. This is a synthetic illustration, not a real post.",
+              "checked_at": "2026-10-01T18:04:10Z",
+              "image": {
+                "mime_type": "image/png",
+                "base64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAAC0CAIAAABqhmJGAAAFNklEQVR4nO3dwW1cRxREUaVmOCYFobwchzPojTbeavEBYtCkxhQJqV79PsAJYND17vbPl/X9P6DUl/gvAD5MwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFBMwFDsuID//vrPZ8R/Pzw6IuBPRitmxrpzwL+pWyUzxw0D/mPdKpm4WwUcTFfGRNwk4Hi0h2T877e/eFNqkfqA46EelXG8k7FSixQHHI/zwIzjnYyVWqQy4HiQx2Yc72Ss1CJ9Acc7PLnheCdjpRYpCzhe4OENxzsZK7VITcDx8GS8BCzgj4n3puFLvJOxUosUBBwvTcMv4p2MlVpkesDxxjT8KN7JWKlFRgccr0vDm3gnY6UWmRtwvCsNvxbvZKzUIkMDjhel4TfFOxkrtcjEgOMtafhn4p2MlVpkXMDxijT8RLyTsVKLzAo43s8E8RWeiHcyVmoRAY8TX+GJeCdjpRYZFHC8nDniW/xMvJOxUotMCTjezDTxRd4U72Ss1CIjAo7XMlN8l9finYyVWkTAc8V3eS3eyVipRfIBxzuZLL7OJt7JWKlFBDxafJ1NvJOxUouEA44XMl882kfxTsZKLSLg6eLRPop3MlZqkWTA8TZaxLsVsIAFLOA7Oy7geBVd4ukKWMACFvBtnRVwvIdG8XoFLGABC/ieBIyAix0UcLyEXgIeS8AIuJiAEXCxUwKON9BOwDMJGAEXEzAFATONgMvEL4ZR/mjA8eu/h/jRMIeA+8SPhjkE3Cd+NMwh4D7xo2EOAfeJHw1zCLhP/GiYQ8B94kfDHALuEz8a5hBwn/jRMIeA+8SPhjkE3Cd+NMwh4D7xo2EOAfeJHw1zCLhP/GiYQ8B94kfDHALuEz8a5hBwn/jRMIeA+8SPhjkE3Cd+NMwh4D7xo2EOAfeJHw1z+CplmfjFMIqAy2TPJf799NLPr/8+Ai6TPZd4gQLeCLhM9lziBQp4498Jm8TPJV6ggDcCbhI/l3iBAt4IuEn8XOIFCngTCHhpuLPeJeB5BFwjfitLwPMIuEb8VpaA58kEvDRcWO8S8DwC7hA/lEu8QAFvYgEvDbfVuwQ8j4ALxK/kRbxAAW+SAS8NV9W7BDyPgKeLn8ijeIEC3oQDXhruqXcJeB4BjxZfZxMvUMCbfMBLwyX1LgHPI+C54ru8Fi9QwJsRAS8NN9S7BDzPlICXhsfXuwQ8z6CAl4Zn17sEPI+Ax4mv8ES8QAFvZgW8jm84/v7PxQsU8GZcwOvghuMv/7/iBQp4MzHgdWTD8Td/j3iBAt4MDXgd1nD8td8pXqCAN3MDXsc0HH/n94sXKODN6IDXAQ3HX/iXxAsU8GZ6wOvWDcff9lfFCxTwpiDgddOG46/6AfECBbzpCHjdruH4e35MvEABb2oCvsTDOzbdS7xAAW/KAl7lDcdf75PiBQp40xfwqm04/m6fFy9QwJvKgC/xII9K9xIvUMCb4oAv8TgPSfcSL1DAm/qAL/FQb5/uJV6ggDc3CfgSj/bG6TLTrQK+SJdz3DDgF7rl9u4c8AvdcldHBPxItNzJcQHDnQgYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYigkYiv0Afm4CYqzcJdEAAAAASUVORK5CYII=",
+                "alt": "Synthetic illustration: a blue circle beside two orange rectangles."
+              }
+            },
+            {
+              "kind": "own_media",
+              "inspection": "not_inspected",
+              "source_url": "",
+              "summary": "The linked video was not played during this check.",
+              "checked_at": "2026-10-01T18:04:10Z"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "account_id": "0f9e8d7c6b5a41322314a5b6c7d8e9f0",
+      "status": "blocked",
+      "checked_at": null,
+      "summary": "Not read. The browser is signed out of this account.",
+      "coverage": "Nothing was read. Sign in to this account in your browser and I will read it on the next check.",
+      "items_reviewed": 0,
+      "deleted_count": 0,
+      "pending_deletion_count": 0,
+      "findings": []
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+.env.*
+!.env.example
+*.sqlite*
+*.db*
+data/
+private/
+backups/
+*.log
+test-results/
+screenshots/
+
+# scanned reference material (copyrighted; local only)
+docs/internal/**/scans/
