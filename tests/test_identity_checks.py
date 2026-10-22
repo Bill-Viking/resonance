@@ -1,5 +1,6 @@
 """Identity guards use synthetic accounts and temporary databases only."""
 import copy
+from contextlib import closing
 from datetime import timedelta
 import json
 from pathlib import Path
@@ -243,7 +244,7 @@ class IdentityCheckTests(unittest.TestCase):
             self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
             self.assertEqual(db.execute('SELECT count(*) FROM action_identity_checks').fetchone()[0], 0)
         snapshots = sorted((directory / 'backups/auto').glob('*-before-v3.sqlite3'))
-        with sqlite3.connect(snapshots[-1]) as saved:
+        with closing(sqlite3.connect(snapshots[-1])) as saved:
             self.assertEqual(saved.execute('PRAGMA user_version').fetchone()[0], 2)
             self.assertIsNone(saved.execute("SELECT name FROM sqlite_master WHERE name='action_identity_checks'").fetchone())
 
