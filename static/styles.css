@@ -359,3 +359,9 @@ main{max-width:1680px;padding:22px 24px 32px}.workspace-footer{max-width:1680px;
 .identity-check-panel p{line-height:1.6;font-size:13px;margin:12px 0}
 .identity-check-panel .field-help{font-size:12px;color:var(--muted)}
 .identity-observation{border-left:2px solid var(--line);padding-left:10px}
+
+.edit-availability-note {margin:.8rem 0 0;color:var(--muted);font-size:.88rem;line-height:1.5;overflow-wrap:anywhere}
+.edit-availability-note strong {color:var(--text)}
+.edit-availability-note .text-button {margin-left:.45rem;text-decoration:underline}
+.edit-availability-panel {overflow-wrap:anywhere}
+.edit-availability-panel .detail-meta-list dd {min-width:0}

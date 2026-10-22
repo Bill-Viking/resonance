@@ -287,11 +287,16 @@ The constraints below describe the reserved format, not a claim that a proposal 
 
 ## Carrying out an edit or a deletion
 
+A report finding may also include `edit_availability` with the five fields documented below: status, actual checked_at, exact source_url, concrete reason and nullable available_until. Its time must fall within the report and its source must be the finding’s exact original. This is dated capability history, not the user’s words or execution authority. Report observations can hold an edit, but only a fresh matching request-bound observation can enable it. Changing availability alone does not reopen a Keep or alter the meaning of saved content. Old reports without this field remain unknown.
+
 Only prepare an item under `queued` in `--work` when `can_prepare: true` and `confirmation_required: false`. A fresh identity comparison must then make `can_execute` true before a durable start. Take one request at a time, from start to finish.
 
 If the user asks you in conversation to change a post, ask them to press **Modify** or **Delete** on its card in Resonance first. That creates the request and its record; then you can carry it out at once.
 
-1. **Look and compare identities.** Open the request's `source_url`. Inspect the active account through the provider's account controls and the source author's own profile. Use stable handles and profile links, not display names or avatars. Read the whole live text; `original_excerpt` may be partial. Save the observation described below and run `--check-identity`. Go on only when it returns `identity_preflight.status: matched`, `can_execute: true` and `confirmation_required: false`. A mismatch, missing profile, sign-out, unknown identity or unavailable author is a stop. Show the discrepancy and offer explicit account selection or repair; never substitute another saved account or relax its boundary.
+1. **Look and compare identities.** Open the request's `source_url`. Inspect the active account through the provider's account controls and the source author's own profile. Use stable handles and profile links, not display names or avatars. Read the whole live text; `original_excerpt` may be partial. For an edit, inspect the text-edit controls on this exact post as well; never infer availability from the platform or post age. Save the observation described below and run `--check-identity`. Go on only when it returns `identity_preflight.status: matched`, `can_execute: true` and `confirmation_required: false`; edits also require `edit_preflight.status: available`. A mismatch, missing profile, sign-out, unknown identity or unavailable author is a stop. Show the discrepancy and offer explicit account selection or repair; never substitute another saved account or relax its boundary.
+
+   If editing is unavailable, say why before asking the user to approve an edit. Offer Keep or a separately reviewed follow-up reply/separate-post draft. Unknown availability stays unknown; inspect again rather than guessing. Never replace the edit with deletion, reposting or a reply. Res can prepare and copy a local follow-up draft, but this edition has no guarded publication action type. Publishing it requires a separate exact preview of the account, parent, text, audience and media, the user’s changed-action choice, and the publishing workflow’s own durable attempt and verified receipt. Do not submit it through an edit/delete request.
+
 2. **For an edit, use their words.** The new text is the request's `proposed_text`, exactly. Do not improve it. If it is unclear what should replace what, or the live post no longer matches what they saw, do not guess — that is a `blocked` outcome with the reason.
 3. **Get the yes.** Show the user the live text, the change, and for an edit the new text. Wait for a clear yes to this one item. If your own tools also ask them to confirm, that is a second lock; never work around it. If the user is not there, stop here: leave the request queued, count a waiting deletion in `pending_deletion_count`, and say in your summary that it needs their yes.
 4. **Record the attempt.**
@@ -307,7 +312,7 @@ If the user asks you in conversation to change a post, ask them to press **Modif
    python3 monitor.py --request REQUEST_ID
    ```
 
-   It prints the `action_request` as it stands now, with `evidence_current`, `identity_current` and `user_completed`, and changes nothing. Go on only if the request it prints is the one you asked for, its `execution_state` is `running`, its `attempt_id` is the one you were just given, both `evidence_current` and `identity_current` are exactly `true`, and `user_completed` is exactly `false`. Recheck the browser's active identity immediately before the provider click; Resonance cannot detect a browser account switch. If it changed or is uncertain, stop even if the saved comparison is fresh. Anything the user did to this post themselves since your attempt began stops you, even if it has already been verified. A missing or unreadable answer is also a stop. Report `blocked` without another provider attempt. Never use `--work` for this last look — it moves a running attempt into verification-only work.
+   It prints the `action_request` as it stands now, with `evidence_current`, `identity_current`, `edit_current` and `user_completed`, and changes nothing. Go on only if the request it prints is the one you asked for, its `execution_state` is `running`, its `attempt_id` is the one you were just given, `evidence_current`, `identity_current` and `edit_current` are all exactly `true`, and `user_completed` is exactly `false`. Recheck the browser's active identity and, for an edit, its current edit controls immediately before the provider click; Resonance cannot detect a browser account switch. If it changed or is uncertain, stop even if the saved comparison is fresh. Anything the user did to this post themselves since your attempt began stops you, even if it has already been verified. A missing or unreadable answer is also a stop. Report `blocked` without another provider attempt. Never use `--work` for this last look — it moves a running attempt into verification-only work.
 6. **Make the one change.** Only now, while the user's yes still stands. Nothing else on the page.
 7. **Verify on the platform.** For an edit, reload the item and read the new text. For a deletion, confirm that the platform itself shows this item as removed while you are still signed in, and that it is gone from the user's own list. A click, an error page, a page that merely fails to load, or a hidden comment proves nothing.
 8. **Report the outcome** in your report's `requests` list, in the same run.
@@ -362,6 +367,20 @@ Write one JSON file inside the private data folder, outside repositories and clo
   "detail": "The account controls and this source's author profile show these identifiers."
 }
 ```
+
+For an edit, include this additional `edit_availability` object inside that same observation:
+
+```json
+{
+  "status": "available",
+  "checked_at": "2026-10-01T18:00:00Z",
+  "source_url": "https://x.com/river_example/status/1001",
+  "reason": "The exact post’s text-edit control was inspected and opens its editor.",
+  "available_until": null
+}
+```
+
+Use the actual observation time, identical to the outer `checked_at`, and the same exact source. Status is `available`, `unavailable` or `unknown`; a concrete reason is required for each. `available_until` is null unless the provider actually shows an edit deadline. Never calculate a deadline from a remembered rule, subscription or post age. Available checks expire after five minutes or the observed deadline, whichever comes first. Missing, expired, unavailable, unknown, changed or imported-only edit checks cannot start an edit. A newer conflicting observation also stops the read-only last look. Delete/Keep do not require edit availability.
 
 `status` is `signed_in`, `signed_out` or `unavailable`. A signed-in observation can still produce a mismatch. Save no password, cookie or credential. Then run:
 
@@ -420,3 +439,8 @@ Recording a schedule does not create one, and Resonance cannot see your schedule
 | `--data-dir DIR` with any of them | Uses another data folder, for a rehearsal with nothing real in it. |
 
 None of these commands goes online, signs in anywhere, or changes anything on a platform. Only you can do that — under rule 4.
+
+A newer conflicting report revokes the old combined start check. A later report
+that says editing is available cannot revive it; inspect again and save a new
+request-bound observation while the request is still queued. Attempted work stays
+verification-only. The report retains its dated history without execution authority.

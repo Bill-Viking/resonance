@@ -239,7 +239,7 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   const workerEvents={},removed=[];
   let activation;
   const workerContext={self:{addEventListener(name,handler){workerEvents[name]=handler;},clients:{claim:async()=>{}}},
-    caches:{keys:async()=>['social-brief-shell-v12','resonance-shell-v15','resonance-shell-v16','resonance-shell-v17','unrelated-cache'],
+    caches:{keys:async()=>['social-brief-shell-v12','resonance-shell-v15','resonance-shell-v16','resonance-shell-v18','unrelated-cache'],
       delete:async key=>{removed.push(key);return true;}}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../static/sw.js'),'utf8'),workerContext);
   workerEvents.activate({waitUntil(promise){activation=promise;}});

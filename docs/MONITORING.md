@@ -121,3 +121,29 @@ The complete report and every outcome validate atomically. One invalid or contra
 After `--report`, run `--status` and check the saved ID. Check the exact target and source item in `/api/state` and the Posts/Today interface; changing report text alone does not complete delivery. Keep verified-removal counts distinct from queued actions and user attestations.
 
 `monitoring.next_scheduled_check` is a derived ISO timestamp or null. Daily metadata uses its IANA timezone, daylight-saving rules and expiry. Disabled, expired or unavailable schedule metadata yields no countdown. Say **Next scheduled check**, never a promised completion time. No report means **No result recorded**, not proof the host scheduler missed a run.
+
+## Edit controls for an exact post
+
+A post/comment/reply finding may include `edit_availability` with all five fields:
+`status`: available, unavailable or unknown; `checked_at`: actual ISO observation
+time within the report; `source_url`: the finding’s exact source; `reason`:
+concrete observed controls/limit or uncertainty; `available_until`: null unless
+the provider visibly supplies a deadline. Save no remembered platform time rule.
+A finding about an entire account cannot carry item-specific availability.
+
+This report field is historical evidence only. The source card shows the latest
+observation, reason, date and deadline; missing or out-of-date checks stay explicit.
+It cannot authorize a start. An edit request needs availability in its fresh
+request-bound `--check-identity` observation, then its current check ID at start.
+`--request` reports read-only `edit_current`; require true with the other last-look
+conditions, and reinspect active identity and edit controls before clicking.
+Changing availability alone preserves content decisions and fingerprints.
+
+When editing is unavailable, offer Keep or a local follow-up reply/separate-post
+draft for a separate decision. Never turn an edit request into a publication,
+deletion or repost. The app adds no publication action type or provider access.
+
+A newer conflicting report revokes the old combined start check. A later report
+that says editing is available cannot revive it; inspect again and save a new
+request-bound observation while the request is still queued. Attempted work stays
+verification-only. The report retains its dated history without execution authority.

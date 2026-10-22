@@ -1,5 +1,23 @@
 # Changes
 
+## 0.1.0-preview.5
+
+Per-post edit availability shows dated assistant observations, concrete reasons
+and explicitly observed deadlines. Unknown stays unknown. Assistant edit starts
+and the read-only last look require fresh available controls as well as the
+account match; no platform time rule is guessed. Reports and imports retain
+history without granting execution authority.
+
+When editing is unavailable, Keep and separate follow-up reply/post drafts are
+offered. Drafting/copying preserves the original and existing request; publishing
+is a separate reviewed workflow. No reply/post executor or automatic substitution
+is added. Schema 4 protects the optional record format without changing old rows.
+The Res logo and existing style remain unchanged.
+
+Account checks still require an external assistant; the automatic browser reader
+is unfinished. Assistants must supply edit availability with their fresh account
+observation and require `edit_current` in the final read-only check before editing.
+
 ## 0.1.0-preview.4
 
 Assistant edit/removal attempts require a fresh local comparison of the intended

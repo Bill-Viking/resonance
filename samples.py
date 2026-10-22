@@ -345,6 +345,10 @@ class Workspace:
                            handle=account['handle'], profile_url=account['url'], author_handle=account['handle'],
                            author_profile_url=account['url'], source_url=request['source_url'],
                            detail='Scripted sample identity comparison. No browser or platform inspected.')
+        if request['action'] == 'edit':
+            observation['edit_availability'] = dict(status='available', checked_at=observation['checked_at'],
+                source_url=request['source_url'], available_until=None,
+                reason='Scripted sample text-edit controls. No browser or platform inspected.')
         checked = store.mutate('POST', path + '/identity-check', observation)[1]['action_request']
         store.mutate('POST', path + '/start', {'identity_check_id': checked['identity_check']['id']})
         result = store.mutate('PATCH', path, {

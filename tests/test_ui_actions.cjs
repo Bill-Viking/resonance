@@ -36,9 +36,9 @@ function setup({clipboardFails=false,storage=new Map()}={}) {
   const document={querySelector:get,querySelectorAll(selector){return selector==='[data-nav]'?nav:[];},documentElement:element(),activeElement:null,visibilityState:'visible'};
   class FakeFormData {constructor(form){this.fields=form.fields||{};}get(key){return this.fields[key]||'';}has(key){return Object.hasOwn(this.fields,key);}}
   const sessionStorage={get length(){return storage.size;},key(index){return [...storage.keys()][index]??null;},getItem(key){return storage.has(key)?storage.get(key):null;},setItem(key,value){storage.set(key,String(value));},removeItem(key){storage.delete(key);}};
-  const data=fixture(),calls=[];
+  const data=fixture(),calls=[],clipboardWrites=[];
   let handler=()=>{throw new Error('Unexpected request');};
-  const context={document,URL,Intl,console,FormData:FakeFormData,sessionStorage,location:{hash:'#review'},window:{scrollTo(){}},navigator:{clipboard:{writeText:async()=>{if(clipboardFails)throw new Error('denied');}}},
+  const context={document,URL,Intl,console,FormData:FakeFormData,sessionStorage,location:{hash:'#review'},window:{scrollTo(){}},navigator:{clipboard:{writeText:async(value)=>{if(clipboardFails)throw new Error('denied');clipboardWrites.push(value);}}},
     matchMedia:()=>({matches:false}),setTimeout:fn=>{fn();return 1;},clearTimeout(){},
     fetch:async(url,options)=>{assert.match(url,/^\/api\//);calls.push({url,...options});return handler(url,options);}};
   vm.createContext(context);
@@ -49,7 +49,7 @@ function setup({clipboardFails=false,storage=new Map()}={}) {
   context.ui.state.data=structuredClone(data);
   context.ui.state.connected=true;
   context.ui.state.view='review';
-  return {ui:context.ui,nodes,get,nav,data,calls,storage,setHandler(fn){handler=fn;},html(){return get('#dialog-content').innerHTML;}};
+  return {ui:context.ui,nodes,get,nav,data,calls,storage,clipboardWrites,setHandler(fn){handler=fn;},html(){return get('#dialog-content').innerHTML;}};
 }
 const response=data=>({ok:true,json:async()=>structuredClone(data)});
 
@@ -492,6 +492,51 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
     assert.ok(themed.html().includes(theme.label),`Appearance names ${value} in plain words`);
   }
   assert.deepEqual(Object.keys(themed.ui.THEMES),['dark','light','system','phosphor','midnight']);
+
+  const unavailable=setup();
+  const unavailableSource=unavailable.ui.state.data.source_items[0];
+  unavailableSource.edit_availability={status:'unavailable',reason:'The <edit> window has ended.',observation:{status:'unavailable',reason:'The <edit> window has ended.',checked_at:'2026-10-21T12:00:00Z',source_url:unavailableSource.source_url,available_until:null}};
+  unavailable.ui.state.data.action_requests[0].edit_preflight={status:'historical',reason:'History only.',observation:{status:'available',checked_at:'2026-10-20T12:00:00Z',source_url:unavailableSource.source_url,available_until:null}};
+  unavailable.ui.sourceModifyDialog('source-1');
+  assert.ok(unavailable.html().includes('This post cannot currently be edited'));
+  assert.ok(unavailable.html().includes('The &lt;edit&gt; window has ended.'));
+  assert.ok(unavailable.html().includes('Draft a follow-up reply'));
+  assert.ok(unavailable.html().includes('Draft a separate post'));
+  assert.ok(unavailable.html().includes('Keep the original'));
+  assert.ok(!unavailable.html().includes('data-action="assistant-choice"'));
+  assert.equal(unavailable.calls.length,0,'opening alternatives performs no action');
+  const originalRequest=structuredClone(unavailable.ui.state.data.action_requests[0]);
+  await unavailable.ui.handleAction({dataset:{action:'follow-up-draft',source:'source-1',draftKind:'reply'}});
+  assert.ok(unavailable.html().includes('Reply beneath'));
+  assert.ok(unavailable.html().includes('Unpublished draft'));
+  assert.ok(unavailable.html().includes('Reply availability has not been checked.'));
+  assert.ok(unavailable.html().includes('SFW only'));
+  assert.ok(unavailable.html().includes('Copy draft'));
+  assert.ok(!unavailable.html().includes('Save edit request'));
+  unavailable.get('#follow-up-text').value='A separately reviewed follow-up.';
+  await unavailable.ui.handleAction({dataset:{action:'copy-follow-up'}});
+  assert.deepEqual(unavailable.clipboardWrites,['A separately reviewed follow-up.']);
+  assert.deepEqual(unavailable.ui.state.data.action_requests[0],originalRequest);
+  assert.equal(unavailable.calls.length,0,'draft/copy neither cancels nor submits provider work');
+  unavailableSource.evidence_fingerprint='changed-source';
+  await unavailable.ui.handleAction({dataset:{action:'copy-follow-up'}});
+  assert.equal(unavailable.clipboardWrites.length,1,'a changed target cannot silently reuse a follow-up draft');
+  unavailable.ui.state.data.action_requests=[];
+  for(const route of [()=>unavailable.ui.editRequestDialog('r1'),()=>unavailable.ui.assistantRequestDialog('source-1','edit'),()=>unavailable.ui.fixNowDialog('source-1','edit'),()=>unavailable.ui.retractionDialog('source-1')]){
+    route();assert.ok(unavailable.html().includes('This post cannot currently be edited'));
+    assert.ok(!unavailable.html().includes('Save edit request'));
+  }
+  await unavailable.ui.handleAction({dataset:{action:'follow-up-draft',source:'source-1',draftKind:'post'}});
+  assert.ok(unavailable.html().includes('Separate post draft'));
+  assert.ok(unavailable.html().includes('Original for context'));
+  unavailable.ui.resetWorkspaceEditors();
+  assert.equal(Object.keys(unavailable.ui.state.followUpDrafts).length,0,'workspace reset removes its local follow-up drafts');
+  const unchecked=setup();
+  assert.ok(unchecked.ui.sourceCard(unchecked.ui.state.data.source_items[0]).includes('Edit availability unknown'));
+  unchecked.ui.state.data.source_items[0].edit_availability={status:'expired',reason:'Recheck the source.',observation:null};
+  unchecked.ui.sourceDetail('source-1');
+  assert.ok(unchecked.html().includes('Edit check out of date'));
+  assert.ok(!unchecked.html().includes('Reported editable'));
 
   console.log('B1 source UI renderer/handler checks passed (no browser or visual claim).');
 })().catch(error=>{console.error(error);process.exitCode=1;});

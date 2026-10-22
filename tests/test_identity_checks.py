@@ -241,7 +241,7 @@ class IdentityCheckTests(unittest.TestCase):
         upgraded = server.Store(directory)
         with upgraded.connect() as db:
             self.assertEqual([tuple(row) for row in db.execute('SELECT * FROM accounts')], [tuple(row) for row in before])
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], len(server.MIGRATIONS))
             self.assertEqual(db.execute('SELECT count(*) FROM action_identity_checks').fetchone()[0], 0)
         snapshots = sorted((directory / 'backups/auto').glob('*-before-v3.sqlite3'))
         with closing(sqlite3.connect(snapshots[-1])) as saved:

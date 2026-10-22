@@ -65,3 +65,39 @@ The server performs no provider calls. Opening the dashboard neither scans accou
 ## Migration and retained evidence
 
 Old pending requests without a source-evidence fingerprint are held for fresh dashboard review. Imported or legacy authority never becomes executable merely because an old record says pending. Historical completed choices remain visible; an old Keep cannot dismiss a newer concern. Current and future policy flags retain durable `flag_evidence` snapshots. Orphan decision IDs from earlier versions are preserved, but missing details that the old version never stored cannot be reconstructed. Import rejects conflicting original reviews and mismatched request/attestation/flag snapshots.
+
+## Per-post edit availability
+
+`--check-identity ID --observation FILE` accepts an optional nested
+`edit_availability` with `status` (available/unavailable/unknown), `checked_at`,
+`source_url`, `reason` and nullable `available_until`. Its source and timestamp
+must match the outer observation. Edits require it; delete and Keep do not.
+The same current identity-check ID binds both observations to the request,
+account/boundary, action/proposal and exact source evidence. It can be replaced
+only while confirmed and queued, never to authorize a running/uncertain retry.
+
+Presentation adds `edit_preflight`; `can_execute` requires available status for
+edits. Fresh unavailable work is held and cannot be newly queued as an edit.
+Unknown/expired work can be prepared for inspection, but cannot start. Checks
+expire at five minutes or an observed deadline. A newer conflicting source
+observation blocks the start and last look. `--request ID` adds read-only
+`edit_current` (true for non-edit actions); require it alongside evidence_current,
+identity_current and the existing attempt/attestation checks before clicking.
+Inspect the provider controls again: Res cannot detect their external changes.
+
+A finding’s optional dated capability history is displayed on its source card.
+Changing availability alone changes neither authored evidence nor a Keep’s
+fingerprint. History and imports never confer execution authority. Schema 4
+adds a format barrier without changing existing tables/rows, with the normal
+migration backup; portable format remains 2.
+
+Unavailable/unknown previews offer Keep and local follow-up reply/separate-post
+drafts. Drafts preserve account, exact original and content snapshot within the
+tab. Copy refuses a changed target. They neither cancel the old request nor
+publish anything. A follow-up is a separately reviewed action; this edition
+adds no reply/publication executor or deletion/repost substitution.
+
+A newer conflicting report revokes the old combined start check. A later report
+that says editing is available cannot revive it; inspect again and save a new
+request-bound observation while the request is still queued. Attempted work stays
+verification-only. The report retains its dated history without execution authority.

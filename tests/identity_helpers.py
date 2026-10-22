@@ -10,6 +10,10 @@ def observation(account, request, **changes):
                  author_profile_url=profile, source_url=request['source_url'],
                  detail='Synthetic account switcher and source author inspected in a temporary fixture.')
     value.update(changes)
+    if request['action'] == 'edit' and 'edit_availability' not in changes:
+        value['edit_availability'] = dict(status='available', checked_at=value['checked_at'],
+                                        source_url=value['source_url'], available_until=None,
+                                        reason='Synthetic text-edit controls inspected in a temporary fixture.')
     return value
 
 

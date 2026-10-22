@@ -42,7 +42,7 @@ MAIL_SYNC_FIELDS = {'account_id', 'checked_at', 'scope', 'imported_count', 'has_
 MESSAGE_FIELDS = {'id', 'account_id', 'provider_id', 'thread_id', 'subject', 'sender', 'received_at', 'source_url', 'preview', 'is_read', 'imported_at'}
 DRAFT_FIELDS = {'id', 'message_id', 'account_id', 'text', 'created_at', 'updated_at'}
 FINDING_FIELDS = {'severity', 'title', 'detail', 'source_url', 'kind'}
-FINDING_OPTIONAL_FIELDS = {'text', 'quotes', 'context'}
+FINDING_OPTIONAL_FIELDS = {'text', 'quotes', 'context', 'edit_availability'}
 MAX_FINDING_TEXT = 20000
 MAX_FINDING_QUOTES = 20
 MAX_FINDING_QUOTE = 500
@@ -209,6 +209,60 @@ IDENTITY_FIELDS = {'account_id', 'source_key', 'evidence_fingerprint', 'checked_
                    'platform', 'handle', 'profile_url', 'author_handle', 'author_profile_url', 'source_url', 'detail'}
 IDENTITY_ACCOUNT_FIELDS = {'id', 'platform', 'handle', 'display_name', 'url', 'identity_mode', 'daring', 'sfw_only'}
 IDENTITY_TTL_SECONDS = 300
+EDIT_OBSERVATION_FIELDS = {'status', 'checked_at', 'source_url', 'reason', 'available_until'}
+
+
+def edit_observation_record(data):
+    fields(data, EDIT_OBSERVATION_FIELDS, EDIT_OBSERVATION_FIELDS)
+    choice(data['status'], ('available', 'unavailable', 'unknown'), 'edit availability')
+    timestamp(data['checked_at'])
+    url(data['source_url'])
+    if not data['source_url']:
+        raise Invalid('Edit availability requires the exact source URL.')
+    string(data['reason'], 'Edit availability reason', 2000, True)
+    timestamp(data['available_until'], nullable=True)
+    if data['available_until'] is not None:
+        if data['status'] != 'available' or instant(data['available_until']) <= instant(data['checked_at']):
+            raise Invalid('An observed edit deadline must follow an available check.')
+    return data
+
+
+def edit_availability(observation=None):
+    """A dated observation, never a guessed platform rule or execution authority."""
+    result = {'status': 'unknown', 'reason': 'Your assistant has not checked whether this exact post can be edited.',
+              'observation': observation}
+    if observation is None:
+        return result
+    age = (instant(now()) - instant(observation['checked_at'])).total_seconds()
+    deadline = observation['available_until']
+    if deadline is not None and instant(now()) >= instant(deadline):
+        result.update(status='expired', reason='The recorded edit window has ended. Check the post again or choose a follow-up draft.')
+    elif age < 0 or age > IDENTITY_TTL_SECONDS:
+        result.update(status='expired', reason='This edit check is out of date. Check the post again before planning an edit.')
+    else:
+        result.update(status=observation['status'], reason=observation['reason'])
+    return result
+
+
+def request_edit_preflight(request, identity, latest=None):
+    if request['action'] != 'edit':
+        return {'status': 'not_required', 'reason': 'This action does not edit a post.', 'observation': None}
+    observed = (request.get('identity_check') or {}).get('edit_availability')
+    result = edit_availability(observed)
+    if observed is None:
+        if latest and latest['status'] == 'unavailable':
+            return latest
+        return result
+    if identity['status'] != 'matched' and result['status'] != 'expired':
+        result.update(status='historical' if identity['status'] == 'historical' else 'unknown',
+                      reason='A fresh matching account and source-author check must include the edit controls.')
+    elif latest and latest.get('observation'):
+        newer = latest['observation']
+        changed = any(newer[key] != observed[key] for key in ('status', 'available_until'))
+        if instant(newer['checked_at']) >= instant(observed['checked_at']) and changed:
+            result.update(status='changed', reason='A newer or conflicting edit observation is saved. Inspect the post again.',
+                          observation=newer)
+    return result
 
 
 def identity_observation_comparable(account, observation):
@@ -220,7 +274,7 @@ def identity_observation_comparable(account, observation):
 
 
 def identity_observation_record(data):
-    fields(data, IDENTITY_FIELDS, IDENTITY_FIELDS)
+    fields(data, IDENTITY_FIELDS | {'edit_availability'}, IDENTITY_FIELDS)
     identifier(data['account_id'])
     timestamp(data['checked_at'])
     choice(data['status'], ('signed_in', 'signed_out', 'unavailable'), 'observed sign-in status')
@@ -232,13 +286,18 @@ def identity_observation_record(data):
     string(data['source_key'], 'Source key', 4096, True)
     string(data['evidence_fingerprint'], 'Evidence fingerprint', 64, True)
     string(data['detail'], 'Identity observation', 2000, True)
+    if 'edit_availability' in data:
+        edit_observation_record(data['edit_availability'])
+        edit = data['edit_availability']
+        if edit['checked_at'] != data['checked_at'] or workflow.normalize_source(edit['source_url']) != workflow.normalize_source(data['source_url']):
+            raise Invalid('Check edit controls on the same exact source and at the same time as identity.')
     return data
 
 
 def identity_check_record(data):
     extra = {'id', 'recorded_at', 'expected', 'matched', 'reason'}
-    fields(data, IDENTITY_FIELDS | extra, IDENTITY_FIELDS | extra)
-    identity_observation_record({key: data[key] for key in IDENTITY_FIELDS})
+    fields(data, IDENTITY_FIELDS | extra | {'edit_availability'}, IDENTITY_FIELDS | extra)
+    identity_observation_record({key: data[key] for key in IDENTITY_FIELDS | {'edit_availability'} if key in data})
     identifier(data['id'])
     timestamp(data['recorded_at'])
     if instant(data['checked_at']) > instant(data['recorded_at']):
@@ -692,6 +751,12 @@ def monitor_run_record(data, account_ids):
             url(finding['source_url'])
             finding_quotes(finding)
             finding_context(finding, data['completed_at'])
+            if 'edit_availability' in finding:
+                edit = edit_observation_record(finding['edit_availability'])
+                if (finding['kind'] == 'account' or
+                        workflow.normalize_source(edit['source_url']) != workflow.normalize_source(finding['source_url']) or
+                        not instant(data['started_at']) <= instant(edit['checked_at']) <= instant(data['completed_at'])):
+                    raise Invalid('An edit observation must describe this exact finding source during the report.')
     if type(data['requests']) is not list or len(data['requests']) > 1000:
         raise Invalid('A monitoring report must contain at most 1000 request outcomes.')
     outcome_ids, targets = set(), set()
@@ -873,7 +938,13 @@ def identity_check_guards(store, db):
     db.execute('CREATE TABLE IF NOT EXISTS action_identity_checks (request_id TEXT PRIMARY KEY REFERENCES action_requests(id) ON DELETE CASCADE, check_id TEXT NOT NULL, binding TEXT NOT NULL)')
 
 
-MIGRATIONS = (initialize_database, rename_action_scope, identity_check_guards)
+def edit_availability_contract(store, db):
+    # A format barrier: old versions must refuse the new optional observations.
+    # Existing rows and tables are unchanged; the normal migration backup applies.
+    pass
+
+
+MIGRATIONS = (initialize_database, rename_action_scope, identity_check_guards, edit_availability_contract)
 
 
 class Store:
@@ -1073,20 +1144,23 @@ class Store:
                    (request['id'], request['review_id'], request['account_id'], request['source_url'], request['status'], int(confirmed), canonical_json(request), request['source_key']))
 
     @staticmethod
-    def present_action_request(request, confirmed=True, scheduled_for=None, current_fingerprint=None, precise=True, conflict=False, identity=None):
+    def present_action_request(request, confirmed=True, scheduled_for=None, current_fingerprint=None, precise=True, conflict=False, identity=None, edit=None):
         queued = request['status'] == 'pending' and request['execution_state'] == 'queued'
         current = bool(request['evidence_fingerprint']) and request['evidence_fingerprint'] == current_fingerprint
         eligible = queued and confirmed and precise and current and not conflict
         if request['action'] == 'keep':
             identity = {'status': 'not_required', 'reason': 'Keep is a local choice; no provider action starts.', 'expected': None, 'observation': None}
         identity = identity or {'status': 'required', 'reason': 'A fresh account identity check is required before starting.', 'expected': None, 'observation': request.get('identity_check')}
+        edit = request_edit_preflight(request, identity, edit)
         result = dict(request,
-                      identity_preflight=identity, can_prepare=eligible,
+                      identity_preflight=identity, edit_preflight=edit,
+                      can_prepare=eligible and not (edit['status'] == 'unavailable' or
+                          (edit['status'] == 'changed' and (edit['observation'] or {}).get('status') == 'unavailable')),
                       confirmation_required=request['status'] == 'pending' and not confirmed,
                       scheduled_for=scheduled_for,
                       can_cancel=request['status'] == 'pending' and (request['execution_state'] == 'queued' or
                                                                     (request['execution_state'] == 'blocked' and request['attempt_id'] is None)),
-                      can_execute=eligible and identity['status'] == 'matched')
+                      can_execute=eligible and identity['status'] == 'matched' and edit['status'] in ('available', 'not_required'))
         if conflict:
             result['blocker_reason'] = 'Multiple action requests target this source. Cancel or reconcile the extra requests before execution.'
             result['next_move'] = 'none'
@@ -1280,7 +1354,8 @@ class Store:
                         'flag_ids': [], 'quotes': list(finding.get('quotes', [])),
                         'provenance': 'monitoring report ' + run['id'] + ' finding ' + finding_id,
                         '_status': 'open', '_historical': False,
-                        **({'context': finding['context'], '_context_at': run['completed_at']} if 'context' in finding else {})})
+                        **({'context': finding['context'], '_context_at': run['completed_at']} if 'context' in finding else {}),
+                        **({'edit_availability': finding['edit_availability']} if 'edit_availability' in finding else {})})
 
         decision_rows = [source_decision_record(json.loads(row[0])) for row in db.execute('SELECT data FROM source_decisions ORDER BY rowid DESC')]
         item_list, item_by_key = [], {}
@@ -1380,6 +1455,17 @@ class Store:
                       'resolved': 'Resolved'}
             source_changed = any(value.get('evidence_fingerprint') and value['evidence_fingerprint'] != fingerprint
                                  for value in related_requests + related_attestations + related_decisions)
+            edit_observations = [finding['edit_availability'] for finding in group['report_findings'] if 'edit_availability' in finding]
+            edit_observations += [request['identity_check']['edit_availability'] for request in related_requests
+                                  if request['evidence_fingerprint'] == fingerprint and (request.get('identity_check') or {}).get('matched') and
+                                  'edit_availability' in request['identity_check']]
+            latest_edit = max(edit_observations, key=lambda value: (instant(value['checked_at']),
+                              {'available': 0, 'unknown': 1, 'unavailable': 2}[value['status']])) if edit_observations else None
+            edit_state = edit_availability(latest_edit)
+            edit_hold = status == 'waiting' and edit_state['status'] == 'unavailable' and any(
+                value['action'] == 'edit' and value['execution_state'] == 'queued' for value in active_requests)
+            if edit_hold:
+                status = 'needs_you'
             item = {
                 'id': 'src_' + workflow.digest([account_id, source_key])[:24], 'source_key': source_key,
                 'account_id': account_id, 'source_url': group['source_url'],
@@ -1388,13 +1474,15 @@ class Store:
                 'review_id': representative['id'] if representative else None,
                 'title': representative['title'] if representative else (findings[0]['title'] if findings else 'Saved evidence'),
                 'excerpt': representative['excerpt'] if representative else '', 'findings': findings,
-                'evidence_fingerprint': fingerprint, 'status': status, 'status_label': labels[status],
+                'evidence_fingerprint': fingerprint, 'status': status,
+                'status_label': 'Editing unavailable' if edit_hold else labels[status],
                 'needs_attention': status == 'needs_you',
                 'request_ids': [request['id'] for request in related_requests],
                 'active_request_id': (sorted(attempted_requests, key=lambda value: value['created_at'], reverse=True)[0]['id']
                                       if attempted_requests else (active_requests[0]['id'] if active_requests else None)),
                 'attestation_ids': [attestation['id'] for attestation in related_attestations],
                 'snoozed_until': snoozed_until, 'source_changed': source_changed,
+                'edit_availability': edit_state,
             }
             item_list.append(item); item_by_key[(account_id, source_key)] = item
         item_list.sort(key=lambda value: (not value['needs_attention'], value['title'].casefold(), value['id']))
@@ -1589,7 +1677,8 @@ class Store:
                 presented.append(self.present_action_request(
                     raw, confirmed, scheduled_for if raw['status'] == 'pending' and raw['execution_state'] == 'queued' else None,
                     item['evidence_fingerprint'] if item else None,
-                    bool(item and item['precise_source']), len(active) > 1, self.identity_preflight(db, request)))
+                    bool(item and item['precise_source']), len(active) > 1, self.identity_preflight(db, request),
+                    item.get('edit_availability') if item else None))
             result = {'schema_version': 2, 'settings': json.loads(db.execute('SELECT data FROM settings WHERE id=1').fetchone()[0]),
                       'accounts': accounts, 'reviews': reviews, 'action_requests': presented,
                       'attestations': attestations, 'source_decisions': [source_decision_record(json.loads(row[0])) for row in db.execute('SELECT data FROM source_decisions ORDER BY rowid DESC')],
@@ -1618,7 +1707,7 @@ class Store:
         state.pop('source_items')
         state['reviews'].sort(key=lambda value: (value['reviewed_at'], value['id']), reverse=True)
         for request in state['action_requests']:
-            for field in ('confirmation_required', 'scheduled_for', 'can_cancel', 'can_execute', 'can_prepare', 'identity_preflight'):
+            for field in ('confirmation_required', 'scheduled_for', 'can_cancel', 'can_execute', 'can_prepare', 'identity_preflight', 'edit_preflight'):
                 request.pop(field)
         state['monitoring'].pop('next_scheduled_check', None)
         return state
@@ -1638,6 +1727,9 @@ class Store:
         queued = [request for request in state['action_requests'] if request['can_prepare']]
         held = [request for request in state['action_requests'] if request['status'] == 'pending' and
                 request['execution_state'] in ('queued', 'blocked') and not request['can_prepare']]
+        for request in held:
+            if request['action'] == 'edit' and request['edit_preflight']['status'] in ('unavailable', 'changed'):
+                request.update(blocker_reason=request['edit_preflight']['reason'], next_move='open_source')
         verification_requests = [request for request in state['action_requests'] if request['status'] == 'pending' and
                                  (request['execution_state'] == 'needs_verification' or
                                   request['execution_state'] == 'running' or
@@ -1777,9 +1869,11 @@ class Store:
                                  if raw['status'] == 'pending' and raw['execution_state'] == 'queued' else None)
                 presented = self.present_action_request(raw, confirmed, scheduled_for,
                                                         item['evidence_fingerprint'] if item else None,
-                                                        bool(item and item['precise_source']), len(active) > 1, self.identity_preflight(db, request))
+                                                        bool(item and item['precise_source']), len(active) > 1, self.identity_preflight(db, request),
+                                                        item.get('edit_availability') if item else None)
                 return {'action_request': presented, 'evidence_current': current, 'user_completed': user_completed,
-                        'identity_current': presented['identity_preflight']['status'] == 'matched'}
+                        'identity_current': presented['identity_preflight']['status'] == 'matched',
+                        'edit_current': presented['edit_preflight']['status'] in ('available', 'not_required')}
         except (KeyError, TypeError, IndexError, ValueError) as error:
             if isinstance(error, Invalid):
                 raise
@@ -2105,6 +2199,22 @@ class Store:
                     if {a['account_id'] for a in report['accounts']} != account_ids:
                         raise Invalid('Include every saved account, using blocked for accounts that could not be checked.')
                     validated = self.validate_outcomes(db, report['requests'])
+                    # A later report can revoke an edit check, never revive it.
+                    # Keep the attempt and observation history for reconciliation.
+                    for account_report in report['accounts']:
+                        edits = [finding['edit_availability'] for finding in account_report['findings']
+                                 if 'edit_availability' in finding]
+                        if not edits:
+                            continue
+                        for row in db.execute('SELECT data FROM action_requests WHERE account_id=?', (account_report['account_id'],)):
+                            request = action_request_record(json.loads(row[0]))
+                            saved = (request.get('identity_check') or {}).get('edit_availability')
+                            if request['action'] != 'edit' or saved is None:
+                                continue
+                            if any(workflow.normalize_source(edit['source_url']) == request['source_key'] and
+                                   instant(edit['checked_at']) >= instant(saved['checked_at']) and
+                                   any(edit[key] != saved[key] for key in ('status', 'available_until')) for edit in edits):
+                                db.execute('DELETE FROM action_identity_checks WHERE request_id=?', (request['id'],))
                     self.put_monitor_run(db, body)
                     self.materialize_saved_report_reviews(db, [body])
                     outcome_summary = self.apply_outcomes(db, validated, now())
@@ -2292,6 +2402,9 @@ class Store:
                     raise Invalid('A newer identity observation is already saved. Inspect the active account again.')
                 if instant(observation['checked_at']) > instant(changed_at) or instant(observation['checked_at']) < instant(request['created_at']):
                     raise Invalid('Observe identity after this request was created, with no future check date.')
+                latest_edit = item['edit_availability']['observation']
+                if request['action'] == 'edit' and 'edit_availability' in observation and latest_edit and instant(observation['checked_at']) < instant(latest_edit['checked_at']):
+                    raise Invalid('A newer edit observation is already saved. Inspect the post again.')
                 account = account_record(self.get(db, 'accounts', request['account_id']))
                 expected = {key: account[key] for key in IDENTITY_ACCOUNT_FIELDS}
                 matched = False
@@ -2313,8 +2426,10 @@ class Store:
                 db.execute('INSERT INTO action_identity_checks VALUES(?,?,?) ON CONFLICT(request_id) DO UPDATE SET check_id=excluded.check_id,binding=excluded.binding',
                            (request_id, check['id'], self.identity_binding(request, account)))
                 self.log(db, 'Recorded an assistant-reported account and source-author comparison; no provider action performed.')
+                _, refreshed, _, _, _ = self.source_snapshot(db)
                 return 200, {'action_request': self.present_action_request(request, True, None, item['evidence_fingerprint'], True, False,
-                                                                           self.identity_preflight(db, request))}
+                                                                           self.identity_preflight(db, request),
+                                                                           refreshed[(request['account_id'], request['source_key'])]['edit_availability'])}
             if re.fullmatch(r'/api/action-requests/[A-Za-z0-9_-]{1,100}/start', path) and method == 'POST':
                 fields(body, {'identity_check_id'}, {'identity_check_id'})
                 identifier(body['identity_check_id'])
@@ -2342,6 +2457,9 @@ class Store:
                 identity = self.identity_preflight(db, request)
                 if identity['status'] != 'matched' or request['identity_check']['id'] != body['identity_check_id']:
                     raise Invalid(identity['reason'] if identity['status'] != 'matched' else 'Use the current identity check ID; an earlier check cannot start this request.')
+                edit = request_edit_preflight(request, identity, item['edit_availability'])
+                if edit['status'] not in ('available', 'not_required'):
+                    raise Invalid(edit['reason'])
                 changed_at = now()
                 request.update(execution_state='running', started_at=changed_at, attempt_id=uid(), updated_at=changed_at)
                 self.put_action_request(db, action_request_record(durable_request(request)))
@@ -2361,6 +2479,9 @@ class Store:
                     raise Invalid('The saved evidence has no current source item.')
                 if action in ('edit', 'delete') and not item['precise_source']:
                     raise Invalid(item['identity_note'])
+                if action == 'edit' and item['edit_availability']['status'] == 'unavailable':
+                    raise Invalid('Editing is unavailable: ' + item['edit_availability']['reason'] +
+                                  ' Keep the original or prepare a separately reviewed follow-up draft.')
                 if action in ('edit', 'delete') and any(value['account_id'] == item['account_id'] and
                         (value['source_key'] == item['source_key'] or value['review_id'] in item['review_ids']) and
                         value['execution_state'] in ('needs_verification', 'blocked')

@@ -74,6 +74,23 @@ class ActionRequestAPITests(unittest.TestCase):
         body.update(changes)
         return self.request('POST', '/api/action-requests', body)
 
+    def test_http_edit_controls_hold_unknown_unavailable_and_allow_fresh_available(self):
+        action = self.create_action('edit', proposed_text='A revised synthetic statement.')[1]['action_request']
+        path = '/api/action-requests/' + action['id']
+        for edit_status in (None, 'unavailable', 'available'):
+            value = observation(self.account, action)
+            if edit_status is None:value.pop('edit_availability')
+            else:value['edit_availability']['status'] = edit_status
+            status, result = self.request('POST', path + '/identity-check', value)
+            self.assertEqual(status, 200, result)
+            checked = result['action_request']
+            status, result = self.request('POST', path + '/start', {'identity_check_id':checked['identity_check']['id']})
+            self.assertEqual(status, 200 if edit_status == 'available' else 400, result)
+            if edit_status != 'available':
+                snapshot = self.request('GET', '/api/state')[1]['action_requests'][0]
+                self.assertIsNone(snapshot['attempt_id'])
+        self.assertEqual(result['action_request']['execution_state'], 'running')
+
     def test_http_identity_mismatch_cannot_start_or_consume_an_attempt(self):
         action = self.create_action('delete')[1]['action_request']
         path = '/api/action-requests/' + action['id']
@@ -215,7 +232,7 @@ class ActionRequestAPITests(unittest.TestCase):
         action = self.create_action('delete')[1]['action_request']
         backup = self.request('GET', '/api/export')[1]
         canonical_action = dict(action)
-        for field in ('confirmation_required', 'scheduled_for', 'can_cancel', 'can_execute', 'can_prepare', 'identity_preflight'):
+        for field in ('confirmation_required', 'scheduled_for', 'can_cancel', 'can_execute', 'can_prepare', 'identity_preflight', 'edit_preflight'):
             canonical_action.pop(field)
         self.assertEqual(backup['action_requests'][0], canonical_action)
         with tempfile.TemporaryDirectory() as location:

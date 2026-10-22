@@ -231,6 +231,8 @@ def review_source_identity(account, review):
 
 
 def semantic_finding(finding):
+    # Edit controls describe provider capability, not the meaning of the words.
+    # Availability changes hold execution separately and must not undo a Keep.
     value = {
         "title": finding.get("title", ""),
         "detail": finding.get("detail", ""),
