@@ -31,7 +31,7 @@ PLATFORMS = ('YouTube', 'Facebook', 'Instagram', 'X', 'Reddit', 'TikTok', 'Linke
 ACCOUNT_FIELDS = {'id', 'platform', 'handle', 'display_name', 'url', 'access_checked_at', 'access_note', 'created_at', 'identity_mode', 'daring', 'sfw_only'}
 REVIEW_FIELDS = {'id', 'account_id', 'kind', 'title', 'excerpt', 'source_url', 'observed_at', 'reviewed_at', 'sample_count', 'severity', 'finding', 'suggestion', 'origin', 'status', 'snoozed_until', 'updated_at'}
 REVIEW_CORRECTION_FIELDS = {'source_url_correction', 'source_url_corrected_at'}
-ACTION_REQUEST_FIELDS = {'id', 'review_id', 'account_id', 'action', 'status', 'original_excerpt', 'source_url', 'proposed_text', 'created_at', 'updated_at', 'completed_at', 'receipt_url', 'receipt_note', 'source_key', 'evidence_fingerprint', 'execution_state', 'started_at', 'attempt_id', 'blocker_reason', 'next_move'}
+ACTION_REQUEST_FIELDS = {'id', 'review_id', 'account_id', 'action', 'status', 'original_excerpt', 'source_url', 'proposed_text', 'created_at', 'updated_at', 'completed_at', 'receipt_url', 'receipt_note', 'source_key', 'evidence_fingerprint', 'execution_state', 'started_at', 'attempt_id', 'blocker_reason', 'next_move', 'identity_check'}
 ATTESTATION_FIELDS = {'id', 'review_id', 'account_id', 'source_key', 'evidence_fingerprint', 'action', 'note', 'proposed_text', 'result_url', 'original_excerpt', 'source_url', 'created_at', 'done_at', 'execution_state', 'blocker_reason', 'next_move', 'verified_at', 'receipt_url', 'receipt_note'}
 SOURCE_DECISION_FIELDS = {'id', 'account_id', 'source_key', 'evidence_fingerprint', 'status', 'snoozed_until', 'created_at', 'updated_at'}
 FLAG_EVIDENCE_FIELDS = {'id', 'review_id', 'account_id', 'title', 'detail', 'excerpt', 'source_url', 'rule', 'category', 'captured_at'}
@@ -205,6 +205,53 @@ def decision_record(data):
     return data
 
 
+IDENTITY_FIELDS = {'account_id', 'source_key', 'evidence_fingerprint', 'checked_at', 'status',
+                   'platform', 'handle', 'profile_url', 'author_handle', 'author_profile_url', 'source_url', 'detail'}
+IDENTITY_ACCOUNT_FIELDS = {'id', 'platform', 'handle', 'display_name', 'url', 'identity_mode', 'daring', 'sfw_only'}
+IDENTITY_TTL_SECONDS = 300
+
+
+def identity_observation_comparable(account, observation):
+    return (bool(observation['handle'].strip() and observation['author_handle'].strip()) and
+            (bool(account['url']) or account['platform'] != 'LinkedIn') and
+            (not account['url'] or workflow.profile_key(account['platform'], account['url']) is not None) and
+            all(workflow.profile_key(account['platform'], observation[key]) is not None
+                for key in ('profile_url', 'author_profile_url')))
+
+
+def identity_observation_record(data):
+    fields(data, IDENTITY_FIELDS, IDENTITY_FIELDS)
+    identifier(data['account_id'])
+    timestamp(data['checked_at'])
+    choice(data['status'], ('signed_in', 'signed_out', 'unavailable'), 'observed sign-in status')
+    choice(data['platform'], PLATFORMS, 'observed platform')
+    for key in ('handle', 'author_handle'):
+        string(data[key], key.replace('_', ' ').capitalize(), 200)
+    for key in ('profile_url', 'author_profile_url', 'source_url'):
+        url(data[key])
+    string(data['source_key'], 'Source key', 4096, True)
+    string(data['evidence_fingerprint'], 'Evidence fingerprint', 64, True)
+    string(data['detail'], 'Identity observation', 2000, True)
+    return data
+
+
+def identity_check_record(data):
+    extra = {'id', 'recorded_at', 'expected', 'matched', 'reason'}
+    fields(data, IDENTITY_FIELDS | extra, IDENTITY_FIELDS | extra)
+    identity_observation_record({key: data[key] for key in IDENTITY_FIELDS})
+    identifier(data['id'])
+    timestamp(data['recorded_at'])
+    if instant(data['checked_at']) > instant(data['recorded_at']):
+        raise Invalid('An identity observation cannot be recorded before it was checked.')
+    fields(data['expected'], IDENTITY_ACCOUNT_FIELDS, IDENTITY_ACCOUNT_FIELDS)
+    # Reuse the account validator without inventing a second boundary contract.
+    account_record(dict(data['expected'], access_checked_at=None, access_note='', created_at=data['recorded_at']))
+    if type(data['matched']) is not bool:
+        raise Invalid('The identity result must be a boolean.')
+    string(data['reason'], 'Identity check reason', 2000, True)
+    return data
+
+
 def action_request_record(data):
     data = dict(data) if type(data) is dict else data
     if type(data) is dict:
@@ -216,10 +263,18 @@ def action_request_record(data):
         data.setdefault('attempt_id', None)
         data.setdefault('blocker_reason', '')
         data.setdefault('next_move', 'none')
+        data.setdefault('identity_check', None)
     fields(data, ACTION_REQUEST_FIELDS, ACTION_REQUEST_FIELDS)
     identifier(data['id'])
     identifier(data['review_id'])
     identifier(data['account_id'])
+    if data['identity_check'] is not None:
+        identity_check_record(data['identity_check'])
+        check = data['identity_check']
+        if check['account_id'] != data['account_id'] or check['expected']['id'] != data['account_id']:
+            raise Invalid('Identity history must belong to the request account.')
+        if check['source_key'] != data['source_key'] or check['evidence_fingerprint'] != data['evidence_fingerprint']:
+            raise Invalid('Identity history must belong to the exact request evidence.')
     choice(data['action'], ('keep', 'edit', 'delete'), 'action')
     choice(data['status'], ('pending', 'completed', 'cancelled'), 'action status')
     choice(data['execution_state'], ('queued', 'running', 'needs_verification', 'blocked', 'verified', 'reopened', 'cancelled'), 'execution state')
@@ -813,7 +868,12 @@ def rename_action_scope(store, db):
 
 
 # Append migrations here; each index is its destination PRAGMA user_version.
-MIGRATIONS = (initialize_database, rename_action_scope)
+def identity_check_guards(store, db):
+    # Local authority is deliberately absent from portable backups.
+    db.execute('CREATE TABLE IF NOT EXISTS action_identity_checks (request_id TEXT PRIMARY KEY REFERENCES action_requests(id) ON DELETE CASCADE, check_id TEXT NOT NULL, binding TEXT NOT NULL)')
+
+
+MIGRATIONS = (initialize_database, rename_action_scope, identity_check_guards)
 
 
 class Store:
@@ -868,6 +928,7 @@ class Store:
         db.execute('CREATE INDEX IF NOT EXISTS action_requests_by_source ON action_requests(account_id,source_key,status)')
         db.execute('CREATE INDEX IF NOT EXISTS attestations_by_source ON attestations(account_id,source_key,execution_state)')
         db.execute('CREATE INDEX IF NOT EXISTS decisions_by_source ON source_decisions(account_id,source_key,evidence_fingerprint)')
+        identity_check_guards(self, db)
         db.execute('INSERT OR IGNORE INTO settings VALUES (1, ?)', (json.dumps({'display_name': '', 'theme': 'dark'}),))
         db.execute('INSERT OR IGNORE INTO monitor_config VALUES(1, ?)', (canonical_json(monitor_defaults()),))
         db.execute('INSERT OR IGNORE INTO communication_brand VALUES(1, ?)', (canonical_json(brand_defaults()),))
@@ -1012,18 +1073,58 @@ class Store:
                    (request['id'], request['review_id'], request['account_id'], request['source_url'], request['status'], int(confirmed), canonical_json(request), request['source_key']))
 
     @staticmethod
-    def present_action_request(request, confirmed=True, scheduled_for=None, current_fingerprint=None, precise=True, conflict=False):
+    def present_action_request(request, confirmed=True, scheduled_for=None, current_fingerprint=None, precise=True, conflict=False, identity=None):
         queued = request['status'] == 'pending' and request['execution_state'] == 'queued'
         current = bool(request['evidence_fingerprint']) and request['evidence_fingerprint'] == current_fingerprint
+        eligible = queued and confirmed and precise and current and not conflict
+        if request['action'] == 'keep':
+            identity = {'status': 'not_required', 'reason': 'Keep is a local choice; no provider action starts.', 'expected': None, 'observation': None}
+        identity = identity or {'status': 'required', 'reason': 'A fresh account identity check is required before starting.', 'expected': None, 'observation': request.get('identity_check')}
         result = dict(request,
+                      identity_preflight=identity, can_prepare=eligible,
                       confirmation_required=request['status'] == 'pending' and not confirmed,
                       scheduled_for=scheduled_for,
                       can_cancel=request['status'] == 'pending' and (request['execution_state'] == 'queued' or
                                                                     (request['execution_state'] == 'blocked' and request['attempt_id'] is None)),
-                      can_execute=queued and confirmed and precise and current and not conflict)
+                      can_execute=eligible and identity['status'] == 'matched')
         if conflict:
             result['blocker_reason'] = 'Multiple action requests target this source. Cancel or reconcile the extra requests before execution.'
             result['next_move'] = 'none'
+        return result
+
+    @staticmethod
+    def identity_binding(request, account):
+        return workflow.digest({'request': {key: request[key] for key in
+                               ('id', 'account_id', 'action', 'source_key', 'evidence_fingerprint', 'proposed_text')},
+                                'account': {key: account[key] for key in IDENTITY_ACCOUNT_FIELDS}}, 64)
+
+    def identity_preflight(self, db, request):
+        if request['action'] == 'keep':
+            return {'status': 'not_required', 'reason': 'Keep is a local choice; no provider action starts.', 'expected': None, 'observation': None}
+        account = account_record(self.get(db, 'accounts', request['account_id']))
+        expected = {key: account[key] for key in IDENTITY_ACCOUNT_FIELDS}
+        check = request.get('identity_check')
+        result = {'expected': expected, 'observation': check, 'status': 'required',
+                  'reason': 'Your assistant must check the active account and the author of this exact source.'}
+        if not check:
+            return result
+        guard = db.execute('SELECT check_id,binding FROM action_identity_checks WHERE request_id=?', (request['id'],)).fetchone()
+        if not guard or guard['check_id'] != check['id']:
+            result.update(status='historical', reason='Saved history only. A new local identity check is required.')
+        elif guard['binding'] != self.identity_binding(request, account):
+            result.update(status='changed', reason='The account, boundary or requested change differs from this check. Review the current request.')
+        elif not check['matched']:
+            status = check['status']
+            if status == 'signed_in':
+                status = ('unavailable' if check['platform'] == account['platform'] and
+                          not identity_observation_comparable(account, check) else 'mismatch')
+            result.update(status=status, reason=check['reason'])
+        else:
+            age = (instant(now()) - instant(check['checked_at'])).total_seconds()
+            if age < 0 or age > IDENTITY_TTL_SECONDS:
+                result.update(status='expired', reason='The identity check expired. Check the active account again before starting.')
+            else:
+                result.update(status='matched', reason='The assistant-reported active account and source author match the saved account.')
         return result
 
     @staticmethod
@@ -1488,7 +1589,7 @@ class Store:
                 presented.append(self.present_action_request(
                     raw, confirmed, scheduled_for if raw['status'] == 'pending' and raw['execution_state'] == 'queued' else None,
                     item['evidence_fingerprint'] if item else None,
-                    bool(item and item['precise_source']), len(active) > 1))
+                    bool(item and item['precise_source']), len(active) > 1, self.identity_preflight(db, request)))
             result = {'schema_version': 2, 'settings': json.loads(db.execute('SELECT data FROM settings WHERE id=1').fetchone()[0]),
                       'accounts': accounts, 'reviews': reviews, 'action_requests': presented,
                       'attestations': attestations, 'source_decisions': [source_decision_record(json.loads(row[0])) for row in db.execute('SELECT data FROM source_decisions ORDER BY rowid DESC')],
@@ -1517,7 +1618,7 @@ class Store:
         state.pop('source_items')
         state['reviews'].sort(key=lambda value: (value['reviewed_at'], value['id']), reverse=True)
         for request in state['action_requests']:
-            for field in ('confirmation_required', 'scheduled_for', 'can_cancel', 'can_execute'):
+            for field in ('confirmation_required', 'scheduled_for', 'can_cancel', 'can_execute', 'can_prepare', 'identity_preflight'):
                 request.pop(field)
         state['monitoring'].pop('next_scheduled_check', None)
         return state
@@ -1534,9 +1635,9 @@ class Store:
                                    next_move='none')
                     self.put_action_request(db, request)
         state = self.state(activity=False, monitor_limit=1)
-        queued = [request for request in state['action_requests'] if request['can_execute']]
+        queued = [request for request in state['action_requests'] if request['can_prepare']]
         held = [request for request in state['action_requests'] if request['status'] == 'pending' and
-                request['execution_state'] in ('queued', 'blocked') and not request['can_execute']]
+                request['execution_state'] in ('queued', 'blocked') and not request['can_prepare']]
         verification_requests = [request for request in state['action_requests'] if request['status'] == 'pending' and
                                  (request['execution_state'] == 'needs_verification' or
                                   request['execution_state'] == 'running' or
@@ -1676,8 +1777,9 @@ class Store:
                                  if raw['status'] == 'pending' and raw['execution_state'] == 'queued' else None)
                 presented = self.present_action_request(raw, confirmed, scheduled_for,
                                                         item['evidence_fingerprint'] if item else None,
-                                                        bool(item and item['precise_source']), len(active) > 1)
-                return {'action_request': presented, 'evidence_current': current, 'user_completed': user_completed}
+                                                        bool(item and item['precise_source']), len(active) > 1, self.identity_preflight(db, request))
+                return {'action_request': presented, 'evidence_current': current, 'user_completed': user_completed,
+                        'identity_current': presented['identity_preflight']['status'] == 'matched'}
         except (KeyError, TypeError, IndexError, ValueError) as error:
             if isinstance(error, Invalid):
                 raise
@@ -2161,8 +2263,61 @@ class Store:
                 self.log(db, 'Snoozed a source item for 24 hours.' if requested == 'snoozed' else 'Reopened a source item.')
                 refreshed = next(value for value in self.source_snapshot(db)[0] if value['id'] == item['id'])
                 return 200, {'source_item': refreshed}
+            if re.fullmatch(r'/api/action-requests/[A-Za-z0-9_-]{1,100}/identity-check', path) and method == 'POST':
+                observation = identity_observation_record(body)
+                request_id = path.split('/')[-2]
+                row = db.execute('SELECT data,confirmed FROM action_requests WHERE id=?', (request_id,)).fetchone()
+                if row is None:
+                    raise LookupError('Action request not found.')
+                request = action_request_record(json.loads(row['data']))
+                if request['status'] != 'pending' or request['execution_state'] != 'queued' or not row['confirmed']:
+                    raise Invalid('Only a locally confirmed queued request can receive a new identity check.')
+                _, by_key, _, source_requests, attestations = self.source_snapshot(db)
+                item = by_key.get((request['account_id'], request['source_key']))
+                if not item or not item['precise_source'] or item['evidence_fingerprint'] != request['evidence_fingerprint']:
+                    raise Invalid('The source or evidence changed. A fresh user choice is required.')
+                if any(value['id'] != request['id'] and value['account_id'] == request['account_id'] and
+                       value['source_key'] == request['source_key'] and value['status'] == 'pending' and
+                       value['execution_state'] in ('queued', 'running', 'needs_verification', 'blocked') for value in source_requests):
+                    raise Invalid('Conflicting action history must be reconciled before checking identity.')
+                if any(value['account_id'] == request['account_id'] and value['source_key'] == request['source_key'] and
+                       value['execution_state'] in ('needs_verification', 'blocked') for value in attestations):
+                    raise Invalid('User-completed work must be verified before preparing an assistant action.')
+                if any(observation[key] != request[key] for key in ('account_id', 'source_key', 'evidence_fingerprint')):
+                    raise Invalid('Copy the exact request account, source key and evidence fingerprint before checking identity.')
+                if workflow.normalize_source(observation['source_url']) != request['source_key']:
+                    raise Invalid('The identity check must inspect the exact requested source.')
+                changed_at = now()
+                if request.get('identity_check') and instant(observation['checked_at']) < instant(request['identity_check']['checked_at']):
+                    raise Invalid('A newer identity observation is already saved. Inspect the active account again.')
+                if instant(observation['checked_at']) > instant(changed_at) or instant(observation['checked_at']) < instant(request['created_at']):
+                    raise Invalid('Observe identity after this request was created, with no future check date.')
+                account = account_record(self.get(db, 'accounts', request['account_id']))
+                expected = {key: account[key] for key in IDENTITY_ACCOUNT_FIELDS}
+                matched = False
+                if observation['status'] != 'signed_in':
+                    reason = 'The account is signed out or its identity could not be inspected. Sign in or repair the saved account, then check again.'
+                elif observation['platform'] == account['platform'] and not identity_observation_comparable(account, observation):
+                    reason = 'A handle or supported profile link is missing or cannot be compared. Inspect the active account and source author, or explicitly repair the saved profile. No replacement account is assumed.'
+                elif observation['platform'] != account['platform'] or not workflow.observed_identity_matches(account, observation['handle'], observation['profile_url']):
+                    reason = 'The observed active account does not match the saved account. Select the intended account or explicitly repair its saved details.'
+                elif not workflow.observed_identity_matches(account, observation['author_handle'], observation['author_profile_url']) or not workflow.source_author_matches(account, request['source_url']):
+                    reason = 'The observed source author does not match the saved account. Do not edit or remove this item.'
+                else:
+                    matched = True
+                    reason = 'Active account and source author match the saved identity.'
+                check = identity_check_record(dict(observation, id=uid(), recorded_at=changed_at,
+                                                   expected=expected, matched=matched, reason=reason))
+                request.update(identity_check=check, updated_at=changed_at)
+                self.put_action_request(db, request)
+                db.execute('INSERT INTO action_identity_checks VALUES(?,?,?) ON CONFLICT(request_id) DO UPDATE SET check_id=excluded.check_id,binding=excluded.binding',
+                           (request_id, check['id'], self.identity_binding(request, account)))
+                self.log(db, 'Recorded an assistant-reported account and source-author comparison; no provider action performed.')
+                return 200, {'action_request': self.present_action_request(request, True, None, item['evidence_fingerprint'], True, False,
+                                                                           self.identity_preflight(db, request))}
             if re.fullmatch(r'/api/action-requests/[A-Za-z0-9_-]{1,100}/start', path) and method == 'POST':
-                fields(body, set())
+                fields(body, {'identity_check_id'}, {'identity_check_id'})
+                identifier(body['identity_check_id'])
                 request_id = path.split('/')[-2]
                 row = db.execute('SELECT data,confirmed FROM action_requests WHERE id=?', (request_id,)).fetchone()
                 if row is None:
@@ -2184,12 +2339,15 @@ class Store:
                              value['status'] == 'pending' and value['execution_state'] in ('queued', 'running', 'needs_verification', 'blocked')]
                 if conflicts:
                     raise Invalid('Conflicting action history must be reconciled before execution.')
+                identity = self.identity_preflight(db, request)
+                if identity['status'] != 'matched' or request['identity_check']['id'] != body['identity_check_id']:
+                    raise Invalid(identity['reason'] if identity['status'] != 'matched' else 'Use the current identity check ID; an earlier check cannot start this request.')
                 changed_at = now()
                 request.update(execution_state='running', started_at=changed_at, attempt_id=uid(), updated_at=changed_at)
                 self.put_action_request(db, action_request_record(durable_request(request)))
                 self.log(db, 'Recorded the durable start of a provider-action attempt.')
                 return 200, {'action_request': self.present_action_request(request, True, None,
-                                                                            item['evidence_fingerprint'], True, False)}
+                                                                            item['evidence_fingerprint'], True, False, self.identity_preflight(db, request))}
             if path == '/api/action-requests' and method == 'POST':
                 fields(body, {'review_id', 'action', 'proposed_text'}, {'review_id', 'action'})
                 identifier(body['review_id'])
@@ -2260,14 +2418,15 @@ class Store:
                         scheduled = workflow.next_scheduled_check(monitor_config_record(json.loads(db.execute('SELECT data FROM monitor_config WHERE id=1').fetchone()[0])))
                         if exact['execution_state'] == 'queued' and exact['evidence_fingerprint'] == item['evidence_fingerprint'] and exact.get('_confirmed'):
                             return 200, {'action_request': self.present_action_request(durable_request(exact), True, scheduled,
-                                                                                       item['evidence_fingerprint'], item['precise_source'], False),
+                                                                                       item['evidence_fingerprint'], item['precise_source'], False, self.identity_preflight(db, exact)),
                                          'created': False}
                         exact.update(source_key=item['source_key'], evidence_fingerprint=item['evidence_fingerprint'],
                                      execution_state='queued', blocker_reason='', next_move='none', updated_at=changed_at)
+                        db.execute('DELETE FROM action_identity_checks WHERE request_id=?', (exact['id'],))
                         self.put_action_request(db, durable_request(exact), confirmed=True)
                         db.execute('UPDATE action_requests SET confirmed=1 WHERE id=?', (exact['id'],))
                         return 200, {'action_request': self.present_action_request(durable_request(exact), True, scheduled,
-                                                                                   item['evidence_fingerprint'], item['precise_source'], False), 'created': False}
+                                                                                   item['evidence_fingerprint'], item['precise_source'], False, self.identity_preflight(db, exact)), 'created': False}
                     if active:
                         raise Invalid('This source already has action work. Open the current request before choosing another action.')
                 self.put_action_request(db, candidate)
@@ -2278,7 +2437,7 @@ class Store:
                     self.log(db, 'Queued a provider action for separate verification; no provider change was made.')
                 scheduled = workflow.next_scheduled_check(monitor_config_record(json.loads(db.execute('SELECT data FROM monitor_config WHERE id=1').fetchone()[0]))) if action != 'keep' else None
                 response = {'action_request': self.present_action_request(candidate, True, scheduled,
-                                                                           item['evidence_fingerprint'], item['precise_source'], False), 'created': True}
+                                                                           item['evidence_fingerprint'], item['precise_source'], False, self.identity_preflight(db, candidate)), 'created': True}
                 if action == 'keep':
                     response['cancelled_request_ids'] = cancelled_ids
                 return 201, response
@@ -2321,7 +2480,7 @@ class Store:
                     self.put_action_request(db, action_request_record(durable_request(request)))
                     self.set_source_review_status(db, item, 'resolved', changed_at)
                     self.log(db, 'Recorded a separately verified provider action receipt and resolved its source evidence.')
-                return 200, {'action_request': self.present_action_request(request, bool(row['confirmed']))}
+                return 200, {'action_request': self.present_action_request(request, bool(row['confirmed']), identity=self.identity_preflight(db, request))}
             if path == '/api/accounts' and method == 'POST':
                 fields(body, {'platform', 'handle', 'display_name', 'url', 'identity_mode', 'daring', 'sfw_only'}, {'platform', 'handle'})
                 account = account_record(dict(id=uid(), platform=body['platform'], handle=body['handle'], display_name=body.get('display_name', ''), url=body.get('url', ''), access_checked_at=None, access_note='', created_at=now(), identity_mode=body.get('identity_mode', 'unclassified'), daring=body.get('daring', 'careful'), sfw_only=body.get('sfw_only', True)))
@@ -2590,6 +2749,7 @@ class Store:
             db.execute('INSERT OR IGNORE INTO flag_evidence(id,review_id,account_id,data) VALUES(?,?,?,?)',
                        (record['id'], record['review_id'], record['account_id'], canonical_json(record)))
         for request in normalized_requests:
+            db.execute('DELETE FROM action_identity_checks WHERE request_id=?', (request['id'],))
             self.put_action_request(db, request, confirmed=False if request['status'] == 'pending' and request['id'] not in existing_requests else None)
         for record in normalized_attestations:
             self.put_attestation(db, record)

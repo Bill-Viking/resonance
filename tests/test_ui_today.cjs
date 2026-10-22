@@ -239,12 +239,12 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   const workerEvents={},removed=[];
   let activation;
   const workerContext={self:{addEventListener(name,handler){workerEvents[name]=handler;},clients:{claim:async()=>{}}},
-    caches:{keys:async()=>['social-brief-shell-v12','resonance-shell-v14','resonance-shell-v15','resonance-shell-v16','unrelated-cache'],
+    caches:{keys:async()=>['social-brief-shell-v12','resonance-shell-v15','resonance-shell-v16','resonance-shell-v17','unrelated-cache'],
       delete:async key=>{removed.push(key);return true;}}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../static/sw.js'),'utf8'),workerContext);
   workerEvents.activate({waitUntil(promise){activation=promise;}});
   await activation;
-  assert.deepEqual(removed.sort(),['resonance-shell-v14','resonance-shell-v15','social-brief-shell-v12']);
+  assert.deepEqual(removed.sort(),['resonance-shell-v15','resonance-shell-v16','social-brief-shell-v12']);
 
   console.log('B2 Today/Accounts renderer and refresh checks passed (no browser or visual claim).');
 })().catch(error=>{console.error(error);process.exitCode=1;});

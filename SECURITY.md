@@ -27,6 +27,10 @@ Do not put Resonance behind a public proxy, a tunnel or a port-forward. It was n
 
 An AI assistant that collects your posts runs with its own permissions, in its own tools. Resonance grants it nothing and sends it nothing. What the assistant may and may not do is written in [ASSISTANT.md](ASSISTANT.md); the rule that matters most is that nothing on a platform is changed without your yes, at that moment, for that item.
 
+Assistant edit/removal starts also require a fresh local identity comparison bound to that exact request, source evidence, saved account and boundary. The assistant supplies the observed active handle/profile and source author through the normal guarded JSON API or command line. Missing, mismatched, changed, expired or imported-only checks cannot start an attempt. Matches expire five minutes after observation; replacing a check revokes its earlier ID. The last-look command reads this condition without writing. Identity history is portable, but its local start-guard table is not exported and imported requests lose local guards. Database schema 3 adds this table through the existing backup/rollback migration; portable backup format remains 2.
+
+This compares what the assistant reported. It cannot authenticate a provider session, validate the truth of an observation, detect a browser account switch or constrain another program's own browser tools. The assistant must inspect the active account again before clicking. A matching comparison neither replaces the user's authorization nor proves the platform result. The app still reads no credentials and makes no outgoing connection.
+
 ## Reporting a problem
 
 Please report a vulnerability privately: on this repository's GitHub page, open **Security** → **Report a vulnerability**. Do not open a public issue for it, and never include real account names, saved text or a backup file in a report.

@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 import server
+from identity_helpers import observation, start_checked
 import workflow
 
 
@@ -95,7 +96,8 @@ class B1WorkflowTests(unittest.TestCase):
         self.assertEqual(changed['status'], 'needs_you')
         request = self.store.mutate('POST', '/api/action-requests', {
             'review_id': new_concern['id'], 'action': 'delete'})[1]['action_request']
-        self.assertTrue(next(value for value in self.store.state()['action_requests'] if value['id'] == request['id'])['can_execute'])
+        self.assertFalse(next(value for value in self.store.state()['action_requests'] if value['id'] == request['id'])['can_execute'])
+        self.assertTrue(next(value for value in self.store.state()['action_requests'] if value['id'] == request['id'])['can_prepare'])
         self.store.mutate('PATCH', '/api/accounts/' + self.account['id'], {'display_name': 'Changed identity'})
         current = next(value for value in self.store.state()['action_requests'] if value['id'] == request['id'])
         self.assertFalse(current['can_execute'])
@@ -120,7 +122,7 @@ class B1WorkflowTests(unittest.TestCase):
         self.store.mutate('POST', '/api/monitor-runs', reopened)
         running_request = self.store.mutate('POST', '/api/action-requests', {
             'review_id': review['id'], 'action': 'delete'})[1]['action_request']
-        self.store.mutate('POST', '/api/action-requests/' + running_request['id'] + '/start', {})
+        start_checked(self.store, running_request['id'])
         result = self.store.mutate('POST', '/api/attestations', {
             'review_id': review['id'], 'action': 'delete', 'note': 'I also removed it myself.'})[1]
         self.assertIn(running_request['id'], result['running_request_ids'])
@@ -135,13 +137,13 @@ class B1WorkflowTests(unittest.TestCase):
         with self.assertRaises(server.Invalid):
             self.store.mutate('PATCH', '/api/action-requests/' + request['id'], {
                 'status': 'completed', 'receipt_url': request['source_url'], 'receipt_note': 'No durable start.'})
-        started = self.store.mutate('POST', '/api/action-requests/' + request['id'] + '/start', {})[1]['action_request']
+        started = start_checked(self.store, request['id'])[1]['action_request']
         self.assertIsNotNone(started['attempt_id'])
         work = self.store.work()
         unknown = work['verification']['requests'][0]
         self.assertEqual(unknown['execution_state'], 'needs_verification')
         with self.assertRaises(server.Invalid):
-            self.store.mutate('POST', '/api/action-requests/' + request['id'] + '/start', {})
+            start_checked(self.store, request['id'])
         blocked = self.report('blocked-attempt', [self.outcome(
             unknown, 'request', 'blocked', reason='Sign-in needed.', next_move='open_source')])
         self.store.mutate('POST', '/api/monitor-runs', blocked)
@@ -160,7 +162,7 @@ class B1WorkflowTests(unittest.TestCase):
         review = self.review()
         request = self.store.mutate('POST', '/api/action-requests', {
             'review_id': review['id'], 'action': 'delete'})[1]['action_request']
-        self.store.mutate('POST', '/api/action-requests/' + request['id'] + '/start', {})
+        start_checked(self.store, request['id'])
         target = next(value for value in self.store.state()['action_requests'] if value['id'] == request['id'])
         invalid = self.report('atomic', [self.outcome(target, 'request', 'verified'),
                                          dict(self.outcome(target, 'request', 'verified'), id='missing')])
@@ -301,7 +303,7 @@ class B1WorkflowTests(unittest.TestCase):
         self.assertTrue(any(value['title'] == flag_title for value in initial['findings']))
         request = self.store.mutate('POST', '/api/action-requests', {
             'review_id': review['id'], 'action': 'delete'})[1]['action_request']
-        self.store.mutate('POST', '/api/action-requests/' + request['id'] + '/start', {})
+        start_checked(self.store, request['id'])
         newer = self.review(title='New concern after start', finding='Changed evidence after attempt.')
         self.store.mutate('POST', '/api/action-requests', {'review_id': newer['id'], 'action': 'keep'})
         item = self.source(review['id'])

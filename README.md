@@ -2,7 +2,7 @@
 
 **See what you have said online and how it may land. Fix it in your own voice. Privately, on your own computer.**
 
-`0.1.0-preview.3 · source preview`
+`0.1.0-preview.4 · source preview`
 
 Resonance is a small app that runs on your own computer. It gathers your own posts, comments and replies into one place, marks the exact words that may land badly with the audience of that account, and helps you keep, change or remove each one. It has no account to create, no cloud behind it and no tracking inside it.
 
@@ -52,6 +52,8 @@ An assistant is listed here only after it has run the whole road on this contrac
 Each post gets one card showing the saved text with the flagged words marked. Assistant-supplied context can show the parent conversation or attachment, when it was inspected, and a small local image preview. Uninspected or missing context is labeled; the app does not fetch or analyze media. **Keep** it, **Modify** it, **Delete** it, or **Snooze** it for a day. Modify and Delete each offer two roads: do it yourself, with the original opened for you, or ask your assistant. **Retract** fills in a withdrawal notice you can reword.
 
 Resonance is careful about what it claims. Clicking a button never changes a platform. "Deleted" appears only after the result was checked on the platform itself; until then the card says what is true — asked, done by you and not yet verified, or blocked, with the reason and the next move.
+
+Before an assistant edit or removal starts, a fresh account check must match the saved identity and the source's author. The action preview shows the intended account, its boundary and the assistant's dated observation together. Missing, mismatched or expired checks hold the action; an alternate account is never substituted automatically. The assistant observes your browser's sign-in through its own tools; Resonance cannot see or monitor that sign-in itself.
 
 ## Accounts and boundaries
 

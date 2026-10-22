@@ -35,17 +35,24 @@ def main(argv=None):
     operation.add_argument('--work', action='store_true', help='Print safe queued work and verification-only reconciliation work')
     operation.add_argument('--validate', type=Path, help='Check a report or learned-list JSON file by shape only, without opening the data store')
     operation.add_argument('--request', metavar='ID', help='Read one request and its current evidence without changing the data store')
+    operation.add_argument('--check-identity', metavar='ID', help='Record an assistant observation of active account and source author for one queued request')
     operation.add_argument('--start-request', metavar='ID', help='Durably start one safe queued request before any provider action')
     operation.add_argument('--profile', action='store_true', help='Read saved account boundaries, brand and past social choices without changing data')
     parser.add_argument('--account', metavar='ID', help='Limit --profile to one saved account')
+    parser.add_argument('--observation', type=Path, help='Private identity observation JSON; required with --check-identity')
+    parser.add_argument('--identity-check-id', metavar='ID', help='Current matching check ID; required with --start-request')
     args = parser.parse_args(argv)
+    if bool(args.check_identity) != bool(args.observation):
+        parser.error('--check-identity requires --observation FILE; --observation is only for that command')
+    if bool(args.start_request) != bool(args.identity_check_id):
+        parser.error('--start-request requires --identity-check-id ID; that flag is only for a start')
     if args.account is not None and not args.profile:
         parser.error('--account is available only with --profile')
     try:
         if args.validate:
             print(json.dumps(validate_monitor_document(read_document(args.validate, private=False)), ensure_ascii=False))
             return 0
-        document = read_document(args.report or args.config) if args.report or args.config else None
+        document = read_document(args.report or args.config or args.observation) if args.report or args.config or args.observation else None
         directory = safe_data_directory(args.data_dir) if args.data_dir is not None else data_directory()
         read_only = args.request is not None or args.profile
         guard = samples.read_only_real_workspace if read_only else samples.real_workspace
@@ -61,8 +68,11 @@ def main(argv=None):
                 result_json = json.dumps(result, ensure_ascii=False)
             elif args.work:
                 result_json = json.dumps(store.work(), ensure_ascii=False)
+            elif args.check_identity:
+                _, result = store.mutate('POST', '/api/action-requests/' + args.check_identity + '/identity-check', document)
+                result_json = json.dumps(result, ensure_ascii=False)
             elif args.start_request:
-                _, result = store.mutate('POST', '/api/action-requests/' + args.start_request + '/start', {})
+                _, result = store.mutate('POST', '/api/action-requests/' + args.start_request + '/start', {'identity_check_id': args.identity_check_id})
                 result_json = json.dumps(result, ensure_ascii=False)
             elif args.request:
                 result_json = json.dumps(store.request_snapshot(args.request), ensure_ascii=False)

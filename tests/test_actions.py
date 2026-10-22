@@ -9,6 +9,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server
+from identity_helpers import observation, start_checked
 
 
 class ActionRequestAPITests(unittest.TestCase):
@@ -43,6 +44,15 @@ class ActionRequestAPITests(unittest.TestCase):
         connection.close()
         return status, json.loads(content) if 'application/json' in response_headers.get('Content-Type', '') else content.decode()
 
+    def start_action(self, request_id):
+        state = self.request('GET', '/api/state')[1]
+        request = next(value for value in state['action_requests'] if value['id'] == request_id)
+        account = next(value for value in state['accounts'] if value['id'] == request['account_id'])
+        path = '/api/action-requests/' + request_id
+        status, result = self.request('POST', path + '/identity-check', observation(account, request))
+        self.assertEqual(status, 200, result)
+        return self.request('POST', path + '/start', {'identity_check_id': result['action_request']['identity_check']['id']})
+
     def create_account(self, **changes):
         body = dict(platform='X', handle='synthetic', identity_mode='named')
         body.update(changes)
@@ -63,6 +73,20 @@ class ActionRequestAPITests(unittest.TestCase):
         body = {'review_id': (review or self.review)['id'], 'action': action}
         body.update(changes)
         return self.request('POST', '/api/action-requests', body)
+
+    def test_http_identity_mismatch_cannot_start_or_consume_an_attempt(self):
+        action = self.create_action('delete')[1]['action_request']
+        path = '/api/action-requests/' + action['id']
+        status, result = self.request('POST', path + '/identity-check', observation(
+            self.account, action, handle='other_example', profile_url='https://x.com/other_example'))
+        self.assertEqual(status, 200, result)
+        checked = result['action_request']
+        self.assertFalse(checked['can_execute'])
+        self.assertEqual(checked['identity_preflight']['status'], 'mismatch')
+        self.assertEqual(self.request('POST', path + '/start', {'identity_check_id': checked['identity_check']['id']})[0], 400)
+        saved = self.request('GET', '/api/state')[1]['action_requests'][0]
+        self.assertIsNone(saved['attempt_id'])
+        self.assertEqual(saved['execution_state'], 'queued')
 
     def test_keep_is_durable_and_resolves_review_and_current_flags(self):
         self.assertEqual(self.request('GET', '/api/state')[1]['policy_flags'][0]['status'], 'open')
@@ -137,7 +161,7 @@ class ActionRequestAPITests(unittest.TestCase):
     def test_remote_completion_requires_a_real_receipt_and_resolves(self):
         action = self.create_action('edit', proposed_text='Replacement text.')[1]['action_request']
         path = '/api/action-requests/' + action['id']
-        self.assertEqual(self.request('POST', path + '/start', {})[0], 200)
+        self.assertEqual(self.start_action(action['id'])[0], 200)
         for body in ({'status': 'completed'},
                      {'status': 'completed', 'receipt_url': '', 'receipt_note': 'Verified'},
                      {'status': 'completed', 'receipt_url': 'javascript:bad', 'receipt_note': 'Verified'},
@@ -175,7 +199,7 @@ class ActionRequestAPITests(unittest.TestCase):
 
     def test_changed_evidence_blocks_completion_without_mutation(self):
         action = self.create_action('delete')[1]['action_request']
-        self.assertEqual(self.request('POST', '/api/action-requests/' + action['id'] + '/start', {})[0], 200)
+        self.assertEqual(self.start_action(action['id'])[0], 200)
         with server.Store(self.temp.name).connect() as db:
             changed = server.Store.get(db, 'reviews', self.review['id'])
             changed['source_url'] = 'https://example.test/items/changed'
@@ -191,7 +215,7 @@ class ActionRequestAPITests(unittest.TestCase):
         action = self.create_action('delete')[1]['action_request']
         backup = self.request('GET', '/api/export')[1]
         canonical_action = dict(action)
-        for field in ('confirmation_required', 'scheduled_for', 'can_cancel', 'can_execute'):
+        for field in ('confirmation_required', 'scheduled_for', 'can_cancel', 'can_execute', 'can_prepare', 'identity_preflight'):
             canonical_action.pop(field)
         self.assertEqual(backup['action_requests'][0], canonical_action)
         with tempfile.TemporaryDirectory() as location:
@@ -214,7 +238,7 @@ class ActionRequestAPITests(unittest.TestCase):
             other.mutate('POST', '/api/import', confirmed_backup)
             self.assertEqual(other.backup(), confirmed_backup)
             self.assertFalse(other.state()['action_requests'][0]['confirmation_required'])
-            other.mutate('POST', '/api/action-requests/' + action['id'] + '/start', {})
+            start_checked(other, action['id'])
             self.assertEqual(other.mutate('PATCH', '/api/action-requests/' + action['id'], receipt)[0], 200)
         legacy = copy.deepcopy(backup)
         legacy.pop('action_requests')

@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import monitor
 import server
+from identity_helpers import observation, start_checked
 
 
 class MonitorCommandTests(unittest.TestCase):
@@ -55,7 +56,7 @@ class MonitorCommandTests(unittest.TestCase):
         with patch('server.now', return_value='2026-10-01T12:00:00Z'):
             request = self.store.mutate('POST', '/api/action-requests', {
                 'review_id': self.review['id'], 'action': 'delete'})[1]['action_request']
-            self.request = self.store.mutate('POST', '/api/action-requests/' + request['id'] + '/start', {})[1]['action_request']
+            self.request = start_checked(self.store, request['id'])[1]['action_request']
         return self.request
 
     def attest(self, at='2026-10-01T12:05:00Z', verified=True):
@@ -84,6 +85,44 @@ class MonitorCommandTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.files(), before, 'a last look must leave every data file unchanged')
         return json.loads(result.stdout)
+
+    def test_identity_commands_match_then_start_and_last_look_is_read_only(self):
+        self.fixture(start=False)
+        self.request = self.store.mutate('POST', '/api/action-requests', {
+            'review_id': self.review['id'], 'action': 'delete'})[1]['action_request']
+        document = self.document(observation(self.account, self.request))
+        checked = self.cli('--check-identity', self.request['id'], '--observation', document)
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        checked = json.loads(checked.stdout)['action_request']
+        self.assertTrue(checked['can_execute'])
+        started = self.cli('--start-request', self.request['id'], '--identity-check-id', checked['identity_check']['id'])
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.assertEqual(json.loads(started.stdout)['action_request']['execution_state'], 'running')
+        self.assertTrue(self.read_request()['identity_current'])
+
+    def test_identity_command_records_a_mismatch_without_starting(self):
+        self.fixture(start=False)
+        self.request = self.store.mutate('POST', '/api/action-requests', {
+            'review_id': self.review['id'], 'action': 'delete'})[1]['action_request']
+        document = self.document(observation(self.account, self.request,
+                                  handle='other_example', profile_url='https://www.youtube.com/@other_example'))
+        checked = self.cli('--check-identity', self.request['id'], '--observation', document)
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        checked = json.loads(checked.stdout)['action_request']
+        self.assertFalse(checked['can_execute'])
+        started = self.cli('--start-request', self.request['id'], '--identity-check-id', checked['identity_check']['id'])
+        self.assertEqual(started.returncode, 1)
+        self.assertIn('does not match', started.stderr)
+        self.assertIsNone(self.read_request()['action_request']['attempt_id'])
+
+    def test_identity_option_errors_do_not_open_or_create_data(self):
+        for args in (('--start-request', 'missing'), ('--check-identity', 'missing'),
+                     ('--status', '--identity-check-id', 'unused'),
+                     ('--status', '--observation', self.root / 'missing.json')):
+            with self.subTest(args=args):
+                result = self.cli(*args)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(self.data.exists())
 
     def test_examples_validate_without_creating_or_opening_data(self):
         for name in ('report', 'learned'):

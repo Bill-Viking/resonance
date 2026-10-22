@@ -107,7 +107,7 @@ class LocalAPITest(unittest.TestCase):
             self.assertEqual(self.request('GET', path)[0],400)
         self.assertEqual(self.request('POST','/api/import',before)[0],400)
         self.assertEqual(self.request('POST','/api/accounts',{'platform':'X','handle':'real-again'}, {'X-Resonance-Workspace':old_token})[0],400)
-        for args in [['--status'],['--work'],['--request',queued['id']],['--start-request',queued['id']]]:
+        for args in [['--status'],['--work'],['--request',queued['id']],['--start-request',queued['id'],'--identity-check-id','synthetic-check']]:
             result = subprocess.run([sys.executable,str(server.ROOT/'monitor.py'),'--data-dir',self.temp.name,*args],capture_output=True,text=True)
             self.assertEqual(result.returncode,1,result.stdout)
             self.assertEqual(result.stdout,'')

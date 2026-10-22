@@ -331,7 +331,7 @@ class Workspace:
         self.api.choice(body['decision'], ('yes', 'not_now'), 'sample decision')
         state = store.state(activity=False)
         request = next((item for item in state['action_requests'] if item['id'] == body['request_id']), None)
-        if request is None or not request['can_execute']:
+        if request is None or not request['can_prepare']:
             raise SampleError('Choose a queued sample request before playing the next check.')
         path = '/api/action-requests/' + request['id']
         if body['decision'] == 'not_now':
@@ -339,7 +339,14 @@ class Workspace:
             source = next(item for item in state['source_items'] if request['id'] in item['request_ids'])
             store.mutate('PATCH', '/api/source-items/' + source['id'], {'status': 'open'})
             return dict(result, sample_proof='Not now. The sample post needs your choice again.')
-        store.mutate('POST', path + '/start', {})
+        account = next(value for value in state['accounts'] if value['id'] == request['account_id'])
+        observation = {key: request[key] for key in ('account_id', 'source_key', 'evidence_fingerprint')}
+        observation.update(checked_at=self.api.now(), status='signed_in', platform=account['platform'],
+                           handle=account['handle'], profile_url=account['url'], author_handle=account['handle'],
+                           author_profile_url=account['url'], source_url=request['source_url'],
+                           detail='Scripted sample identity comparison. No browser or platform inspected.')
+        checked = store.mutate('POST', path + '/identity-check', observation)[1]['action_request']
+        store.mutate('POST', path + '/start', {'identity_check_id': checked['identity_check']['id']})
         result = store.mutate('PATCH', path, {
             'status': 'completed', 'receipt_url': request['source_url'],
             'receipt_note': 'Sample proof: the rehearsal checked this sample result. No platform was contacted or changed.'})[1]

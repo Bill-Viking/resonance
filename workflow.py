@@ -159,6 +159,62 @@ def source_author_matches(account, source_url):
     return all(value.casefold() == owner.casefold() for value in comparable)
 
 
+def identity_handle(value):
+    value = value.strip()
+    if value.startswith('@'):
+        value = value[1:]
+    if value.startswith('u/'):
+        value = value[2:]
+    return value.casefold()
+
+
+def profile_key(platform, value):
+    """Conservative profile comparison; unknown routes never prove an identity."""
+    part = urlsplit(normalize_source(value))
+    host = (part.hostname or '').lower().removeprefix('www.').removeprefix('m.')
+    allowed = {'X': {'x.com', 'twitter.com'}, 'YouTube': {'youtube.com'},
+               'Facebook': {'facebook.com'}, 'Instagram': {'instagram.com'},
+               'TikTok': {'tiktok.com'}, 'Reddit': {'reddit.com'},
+               'LinkedIn': {'linkedin.com'}}
+    if part.scheme != 'https' or host not in allowed.get(platform, set()) or part.port is not None or part.fragment:
+        return None
+    path = part.path.rstrip('/')
+    if platform == 'Facebook' and path == '/profile.php':
+        query = parse_qsl(part.query, keep_blank_values=True)
+        return ('Facebook', 'id', query[0][1]) if len(query) == 1 and query[0][0] == 'id' and query[0][1].isdigit() else None
+    if part.query:
+        return None
+    pattern = {'X': r'/([A-Za-z0-9_]+)', 'YouTube': r'/(@[^/@]+|channel/[^/]+)',
+               'Facebook': r'/([A-Za-z0-9_.]+)', 'Instagram': r'/([A-Za-z0-9_.]+)',
+               'TikTok': r'/(@[^/@]+)', 'Reddit': r'/user/([^/]+)',
+               'LinkedIn': r'/(?:in|company)/([^/]+)'}[platform]
+    match = re.fullmatch(pattern, path)
+    if not match:
+        return None
+    slug = match[1]
+    if platform == 'YouTube' and slug.startswith('channel/'):
+        return (platform, 'id', slug[8:])  # Provider IDs remain case-sensitive.
+    if platform == 'Facebook' and slug.isdigit():
+        return (platform, 'id', slug)
+    key = (platform, 'handle', identity_handle(slug))
+    return key + (path.split('/')[1],) if platform == 'LinkedIn' else key
+
+
+def observed_identity_matches(expected, handle, profile_url):
+    if not identity_handle(handle) or identity_handle(handle) != identity_handle(expected['handle']):
+        return False
+    observed = profile_key(expected['platform'], profile_url)
+    if observed is None:
+        return False
+    if observed[1] == 'handle' and observed[2] != identity_handle(handle):
+        return False
+    saved = profile_key(expected['platform'], expected['url']) if expected['url'] else None
+    if expected['url']:
+        return saved is not None and observed == saved
+    return (expected['platform'] != 'LinkedIn' and observed[1] == 'handle' and
+            observed[2] == identity_handle(expected['handle']))
+
+
 def review_source_identity(account, review):
     identity = source_identity(account, review_source_url(review), ["review", review["id"]],
                                review.get("kind", "post"))

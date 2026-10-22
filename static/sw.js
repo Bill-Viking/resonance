@@ -1,6 +1,6 @@
 'use strict';
 // Only the public app shell is cached. API responses and personal data never are.
-const CACHE = 'resonance-shell-v16';
+const CACHE = 'resonance-shell-v17';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon.svg'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));

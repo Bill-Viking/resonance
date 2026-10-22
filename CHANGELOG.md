@@ -1,5 +1,22 @@
 # Changes
 
+## 0.1.0-preview.4
+
+Assistant edit/removal attempts require a fresh local comparison of the intended
+account, observed active identity and exact source author. The preview shows both
+identities, the selected boundary and check date. Missing, mismatched, expired,
+changed or imported-only checks hold the action. Checks expire after five minutes;
+the assistant still rechecks its browser immediately before acting. No browser
+sign-in access, credentials, provider calls or automatic account switching added.
+
+Database upgrades preserve existing records and add a local identity guard table.
+Portable backups retain observation history, but never permission to start an
+action; imported requests need a fresh check. Assistants must use the updated
+`--check-identity` and `--start-request --identity-check-id` contract.
+
+The Res logo is unchanged. Reading accounts and carrying out approved changes
+still require an external assistant; the automatic browser reader is unfinished.
+
 ## 0.1.0-preview.3
 
 Welcome has tighter panel padding and spacing between its heading and three

@@ -81,7 +81,7 @@ Read this before judging anything. This edition does not store accepted learned 
 python3 monitor.py --work
 ```
 
-- `queued` — edits and deletions the user asked for that may be carried out. See *Carrying out an edit or a deletion*.
+- `queued` — edits and deletions eligible for preparation (`can_prepare: true`). They still require the identity check below before `can_execute` can become true.
 - `held` — requests that may not be carried out yet. Leave them alone; each one says why (`blocker_reason`) and what would move it (`next_move`). Mention them to the user.
 - `verification` — things to look at, never to change. See *Looking at work already done*.
 
@@ -287,27 +287,27 @@ The constraints below describe the reserved format, not a claim that a proposal 
 
 ## Carrying out an edit or a deletion
 
-Only for an item under `queued` in `--work`, and only when it shows `can_execute: true` and `confirmation_required: false`. Take one request at a time, from start to finish.
+Only prepare an item under `queued` in `--work` when `can_prepare: true` and `confirmation_required: false`. A fresh identity comparison must then make `can_execute` true before a durable start. Take one request at a time, from start to finish.
 
 If the user asks you in conversation to change a post, ask them to press **Modify** or **Delete** on its card in Resonance first. That creates the request and its record; then you can carry it out at once.
 
-1. **Look.** Open the request's `source_url`. Check that the user is signed in as that account, that the post is theirs, and read the whole live text. The `original_excerpt` saved in Resonance may be only part of it.
+1. **Look and compare identities.** Open the request's `source_url`. Inspect the active account through the provider's account controls and the source author's own profile. Use stable handles and profile links, not display names or avatars. Read the whole live text; `original_excerpt` may be partial. Save the observation described below and run `--check-identity`. Go on only when it returns `identity_preflight.status: matched`, `can_execute: true` and `confirmation_required: false`. A mismatch, missing profile, sign-out, unknown identity or unavailable author is a stop. Show the discrepancy and offer explicit account selection or repair; never substitute another saved account or relax its boundary.
 2. **For an edit, use their words.** The new text is the request's `proposed_text`, exactly. Do not improve it. If it is unclear what should replace what, or the live post no longer matches what they saw, do not guess — that is a `blocked` outcome with the reason.
 3. **Get the yes.** Show the user the live text, the change, and for an edit the new text. Wait for a clear yes to this one item. If your own tools also ask them to confirm, that is a second lock; never work around it. If the user is not there, stop here: leave the request queued, count a waiting deletion in `pending_deletion_count`, and say in your summary that it needs their yes.
 4. **Record the attempt.**
 
    ```
-   python3 monitor.py --start-request REQUEST_ID
+   python3 monitor.py --start-request REQUEST_ID --identity-check-id CHECK_ID
    ```
 
-   Success prints the request with an `attempt_id`. A refusal means stop — the user cancelled it, did it themselves, or the post changed. Tell them what the sentence said.
+   Copy `CHECK_ID` from the matching observation's `identity_check.id`. Checks expire five minutes after the observed time; if approval took longer, inspect the active account again and record a new check while the request is still queued. Success prints the request with an `attempt_id`. A refusal means stop — identity, source, permission or saved work may have changed. Tell the user what the sentence said.
 5. **Look once more, right before you act.** Minutes may have passed, and the user may have dealt with the post themselves in the meantime.
 
    ```
    python3 monitor.py --request REQUEST_ID
    ```
 
-   It prints the `action_request` as it stands now, with `evidence_current` and `user_completed`, and changes nothing. Go on only if the request it prints is the one you asked for, its `execution_state` is `running`, its `attempt_id` is the one you were just given, `evidence_current` is exactly `true` and `user_completed` is exactly `false`. Anything the user did to this post themselves since your attempt began stops you, even if it has already been verified. An answer that is missing or unreadable is a stop too. If any check fails, change nothing on the platform: report `blocked` with the reason — or, if intake calls that stale, follow *Looking at work already done*. Never use `--work` for this look — it moves your running attempt into verification-only work.
+   It prints the `action_request` as it stands now, with `evidence_current`, `identity_current` and `user_completed`, and changes nothing. Go on only if the request it prints is the one you asked for, its `execution_state` is `running`, its `attempt_id` is the one you were just given, both `evidence_current` and `identity_current` are exactly `true`, and `user_completed` is exactly `false`. Recheck the browser's active identity immediately before the provider click; Resonance cannot detect a browser account switch. If it changed or is uncertain, stop even if the saved comparison is fresh. Anything the user did to this post themselves since your attempt began stops you, even if it has already been verified. A missing or unreadable answer is also a stop. Report `blocked` without another provider attempt. Never use `--work` for this last look — it moves a running attempt into verification-only work.
 6. **Make the one change.** Only now, while the user's yes still stands. Nothing else on the page.
 7. **Verify on the platform.** For an edit, reload the item and read the new text. For a deletion, confirm that the platform itself shows this item as removed while you are still signed in, and that it is gone from the user's own list. A click, an error page, a page that merely fails to load, or a hidden comment proves nothing.
 8. **Report the outcome** in your report's `requests` list, in the same run.
@@ -341,6 +341,35 @@ All ten keys are required; use `""` where you have nothing to say. `id`, `accoun
 `next_move` is the one thing the user can do next: `open_source` (look at the original), `fix_now` (make the change themselves), `confirm_request` (look at the request again in Resonance), or `none`.
 
 Whatever the outcome, there is no second attempt. A fresh choice by the user in Resonance is the only thing that permits another change.
+
+### Identity observation
+
+Write one JSON file inside the private data folder, outside repositories and cloud sync. Copy `account_id`, `source_key`, `evidence_fingerprint` and `source_url` from the exact queued request. Record what the supported browser controls actually showed, at the real `checked_at` time, after the request was created. Never copy an old access snapshot or turn a display name into a handle. All keys below are required; use empty handle/profile strings when unavailable and explain why in `detail`.
+
+```json
+{
+  "account_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "source_key": "https://x.com/river_example/status/1001",
+  "evidence_fingerprint": "COPY EXACTLY FROM THE REQUEST",
+  "source_url": "https://x.com/river_example/status/1001",
+  "checked_at": "2026-10-01T18:00:00Z",
+  "status": "signed_in",
+  "platform": "X",
+  "handle": "@river_example",
+  "profile_url": "https://x.com/river_example",
+  "author_handle": "@river_example",
+  "author_profile_url": "https://x.com/river_example",
+  "detail": "The account controls and this source's author profile show these identifiers."
+}
+```
+
+`status` is `signed_in`, `signed_out` or `unavailable`. A signed-in observation can still produce a mismatch. Save no password, cookie or credential. Then run:
+
+```
+python3 monitor.py --check-identity REQUEST_ID --observation /absolute/private/identity.json
+```
+
+The command records the comparison locally and returns its check ID and reason. It does not inspect the browser or change a platform. Only a fresh, locally recorded match bound to this exact request can permit a start. Handle and profile evidence must both agree; unknown profile routes or alternate identifiers require explicit repair and a new check. A check cannot be updated after an attempt starts. Imported observations remain history, even after a request is reconfirmed; they never carry start authority. A matching observation does not replace the user's yes or prove an action outcome.
 
 ## Looking at work already done
 
@@ -380,7 +409,8 @@ Recording a schedule does not create one, and Resonance cannot see your schedule
 | --- | --- |
 | `python3 monitor.py --profile [--account ID]` | Prints the saved accounts, their boundaries and what the user has told Resonance. Changes nothing. |
 | `python3 monitor.py --work` | Prints queued, held and verification-only work. An attempt left without an outcome moves to verification. |
-| `python3 monitor.py --start-request ID` | Records that you are about to act on one queued request. Contacts nothing. |
+| `python3 monitor.py --check-identity ID --observation FILE` | Records an active-account/source-author observation and returns the comparison and check ID. Contacts nothing. |
+| `python3 monitor.py --start-request ID --identity-check-id CHECK_ID` | Starts one queued request only with its current fresh local identity match. Contacts nothing. |
 | `python3 monitor.py --request ID` | Prints one request as it stands now. Changes nothing, and never retires a running attempt. |
 | `python3 monitor.py --validate FILE` | Checks a report or a `learned` file. Changes nothing. |
 | `python3 monitor.py --report FILE` | Saves one complete report. |

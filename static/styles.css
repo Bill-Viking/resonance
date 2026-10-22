@@ -348,3 +348,14 @@ main{max-width:1680px;padding:22px 24px 32px}.workspace-footer{max-width:1680px;
   .welcome-panel{padding:20px 16px}
   .welcome-door{padding:16px 12px;gap:10px}
 }
+
+/* Explicit account comparison, within the existing terminal layout. */
+.identity-check-panel{border:1px solid var(--line);padding:16px;margin:18px 0;background:var(--field);min-width:0}
+.identity-check-panel h3{margin:0;font-size:14px}
+.identity-check-panel .section-heading{flex-wrap:wrap;gap:10px}
+.identity-check-panel dd{overflow-wrap:anywhere;min-width:0}
+.identity-check-panel dd a{display:flex;align-items:center;gap:5px;width:fit-content;max-width:100%;margin-top:5px}
+.identity-check-panel dd small{display:block;margin-top:5px}
+.identity-check-panel p{line-height:1.6;font-size:13px;margin:12px 0}
+.identity-check-panel .field-help{font-size:12px;color:var(--muted)}
+.identity-observation{border-left:2px solid var(--line);padding-left:10px}
