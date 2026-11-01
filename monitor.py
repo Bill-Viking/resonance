@@ -38,7 +38,8 @@ def main(argv=None):
     operation.add_argument('--check-identity', metavar='ID', help='Record an assistant observation of active account and source author for one queued request')
     operation.add_argument('--start-request', metavar='ID', help='Durably start one safe queued request before any provider action')
     operation.add_argument('--profile', action='store_true', help='Read saved account boundaries, brand and past social choices without changing data')
-    parser.add_argument('--account', metavar='ID', help='Limit --profile to one saved account')
+    operation.add_argument('--review-context', action='store_true', help='Read one social account’s saved coverage, exact sources and work history without changing data')
+    parser.add_argument('--account', metavar='ID', help='Select one account for --profile or --review-context')
     parser.add_argument('--observation', type=Path, help='Private identity observation JSON; required with --check-identity')
     parser.add_argument('--identity-check-id', metavar='ID', help='Current matching check ID; required with --start-request')
     args = parser.parse_args(argv)
@@ -46,19 +47,23 @@ def main(argv=None):
         parser.error('--check-identity requires --observation FILE; --observation is only for that command')
     if bool(args.start_request) != bool(args.identity_check_id):
         parser.error('--start-request requires --identity-check-id ID; that flag is only for a start')
-    if args.account is not None and not args.profile:
-        parser.error('--account is available only with --profile')
+    if args.account is not None and not (args.profile or args.review_context):
+        parser.error('--account is available only with --profile or --review-context')
+    if args.review_context and not args.account:
+        parser.error('--review-context requires --account ID')
     try:
         if args.validate:
             print(json.dumps(validate_monitor_document(read_document(args.validate, private=False)), ensure_ascii=False))
             return 0
         document = read_document(args.report or args.config or args.observation) if args.report or args.config or args.observation else None
         directory = safe_data_directory(args.data_dir) if args.data_dir is not None else data_directory()
-        read_only = args.request is not None or args.profile
+        read_only = args.request is not None or args.profile or args.review_context
         guard = samples.read_only_real_workspace if read_only else samples.real_workspace
         with guard(directory):
             store = Store(directory, read_only=read_only)
-            if args.profile:
+            if args.review_context:
+                result_json = json.dumps(store.review_context(args.account), ensure_ascii=False)
+            elif args.profile:
                 result_json = json.dumps(store.profile_snapshot(args.account), ensure_ascii=False)
             elif args.report:
                 _, result = store.mutate('POST', '/api/monitor-runs', document)

@@ -30,9 +30,9 @@
     youtube:'<rect x="2" y="5" width="20" height="14" rx="4"/><path d="m10 9 5 3-5 3Z"/>',
   };
   const icon = (name, cls = '') => `<svg ${cls ? `class="${cls}"` : ''} viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.info}</svg>`;
-  const platforms = ['YouTube','Facebook','Instagram','X','Reddit','TikTok','LinkedIn','Discord','Substack','Gmail','Outlook'];
+  const platforms = ['YouTube','Facebook','Instagram','X','Reddit','TikTok','LinkedIn','Discord','Substack','Threads','Gmail','Outlook'];
   const WELCOME_PITCH = 'Resonance is a private notebook of what you have said online. Your own AI assistant does the reading and writes what it finds here — this page never touches your accounts.';
-  const platformMarks = {YouTube:icon('youtube'), Facebook:'f', Instagram:'◎', X:'𝕏', Reddit:'r', TikTok:'♪', LinkedIn:'in', Discord:'D', Substack:'S', Gmail:'M', Outlook:'O'};
+  const platformMarks = {YouTube:icon('youtube'), Facebook:'f', Instagram:'◎', X:'𝕏', Reddit:'r', TikTok:'♪', LinkedIn:'in', Discord:'D', Substack:'S', Threads:'T', Gmail:'M', Outlook:'O'};
   const platformIcon = account => `<span class="platform-icon" aria-hidden="true">${platformMarks[account?.platform] || '·'}</span>`;
   const nameOf = account => account ? (account.display_name || account.handle || account.platform) : 'Unknown account';
   const handleOf = account => account?.handle || '';
@@ -84,7 +84,13 @@
   const requestForReview = reviewId => actionRequests().filter(request => request.review_id === reviewId).sort((a,b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
   const pendingRequestFor = reviewId => requestForReview(reviewId).find(request => request.status === 'pending');
   const requestById = id => actionRequests().find(request => request.id === id);
-  const activeRequestForSource = item => requestById(item?.active_request_id) || actionRequests().find(request => request.source_key && request.source_key === item?.source_key && ['queued','running','needs_verification','blocked','reopened'].includes(request.execution_state));
+  const ACTIVE_REQUEST_STATES = ['queued','running','needs_verification','blocked'];
+  const isActiveSourceRequest = (request, item) => !!request && !!item && !!request.account_id && request.account_id === item.account_id && !!request.source_key && request.source_key === item.source_key && request.status === 'pending' && ACTIVE_REQUEST_STATES.includes(request.execution_state);
+  const activeRequestForSource = item => {
+    const pointed = requestById(item?.active_request_id);
+    if (isActiveSourceRequest(pointed, item)) return pointed;
+    return actionRequests().find(request => isActiveSourceRequest(request, item));
+  };
   const reviewById = id => state.data?.reviews.find(review => review.id === id);
   const flagCount = id => flagsFor(id).filter(flag => flag.status === 'open').length;
   const communication = () => state.data?.communication || {};
@@ -588,7 +594,7 @@
     return `<button class="account-row" data-action="account-detail" data-id="${esc(account.id)}">${platformIcon(account)}<span class="account-row-info"><span class="account-row-name">${esc(account.platform)}</span><span class="account-row-handle">${esc(handleOf(account))}</span></span><span class="account-row-state ${count ? 'has-evidence' : ''}">${count ? `${count} ${count === 1 ? 'observation' : 'observations'}` : 'No evidence yet'}</span>${icon('chevron','chevron')}</button>`;
   }
   function snapshotText(account) { return account.access_checked_at ? `Access snapshot · ${dateText(account.access_checked_at)}` : 'No access snapshot recorded'; }
-  const signInUrls = {Gmail:'https://accounts.google.com/',Outlook:'https://outlook.live.com/mail/',YouTube:'https://accounts.google.com/',Facebook:'https://www.facebook.com/login/',Instagram:'https://www.instagram.com/accounts/login/',X:'https://x.com/i/flow/login',Reddit:'https://www.reddit.com/login/',TikTok:'https://www.tiktok.com/login',LinkedIn:'https://www.linkedin.com/login',Discord:'https://discord.com/login',Substack:'https://substack.com/sign-in'};
+  const signInUrls = {Gmail:'https://accounts.google.com/',Outlook:'https://outlook.live.com/mail/',YouTube:'https://accounts.google.com/',Facebook:'https://www.facebook.com/login/',Instagram:'https://www.instagram.com/accounts/login/',X:'https://x.com/i/flow/login',Reddit:'https://www.reddit.com/login/',TikTok:'https://www.tiktok.com/login',LinkedIn:'https://www.linkedin.com/login',Discord:'https://discord.com/login',Substack:'https://substack.com/sign-in',Threads:'https://www.threads.com/'};
   const accessLabels = {verified:'Verified snapshot',blocked:'Blocked',needs_login:'Sign-in needed',unverified:'Not verified'};
   function accessState(account) {
     const record = accessFor(account.id);
@@ -820,6 +826,14 @@
     try {await navigator.clipboard.writeText(draft.text);toast('Draft copied. Nothing was posted or changed.');}
     catch {editor.focus();editor.select();toast('Text selected. Use Copy from your device’s text menu.');}
   }
+  function mediaPrivacy(value) {
+    if (!['own_media','parent_media'].includes(value.kind)) return '';
+    const check = value.privacy;
+    if (!check || check.status === 'not_checked' || value.inspection !== 'inspected') return `<div class="media-privacy"><strong>Image privacy not checked</strong><p>${esc(check?.detail || 'No sensitive-text inspection was recorded. Open the media before treating it as reviewed.')}</p></div>`;
+    const sensitive = check.status === 'sensitive_text';
+    if (!sensitive && check.status !== 'none_seen') return '<p class="context-media-note">Image privacy not checked</p>';
+    return `<div class="media-privacy"><strong>${sensitive ? 'Sensitive text visible' : 'No sensitive text noticed'}</strong><p>${esc(check.detail)}</p>${sensitive ? `<ul>${(check.regions || []).map(region => `<li><strong>${esc(region.location)}</strong> — ${esc(region.suggestion)}</li>`).join('')}</ul><p>Prepare a cropped or redacted copy with your assistant, then review it before changing the original. Text editing alone does not hide details inside a photo.</p>` : '<p>This describes the inspected media only; it is not a privacy guarantee.</p>'}</div>`;
+  }
   function reviewContext(findings, compact = false) {
     const labels = {own_media:'Your attachment',parent_text:'Parent post',parent_media:'Parent image or video',thread:'Conversation'};
     const states = {inspected:'Inspected',not_inspected:'Not inspected',unavailable:'Unavailable'};
@@ -833,10 +847,10 @@
     const shown = observations.slice(0,compact ? 1 : 4);
     return `<section class="review-context" aria-label="Context for this review"><h4>Context for this review</h4>${shown.map(value => {
       const picture = value.image;
-      const localImage = value.inspection === 'inspected' && ['own_media','parent_media'].includes(value.kind) &&
+      const localImage = value.inspection === 'inspected' && value.privacy?.status !== 'sensitive_text' && ['own_media','parent_media'].includes(value.kind) &&
         ['image/png','image/jpeg','image/webp'].includes(picture?.mime_type) && typeof picture.base64 === 'string' &&
         picture.base64.length <= 349528 && /^[A-Za-z0-9+/]+={0,2}$/.test(picture.base64);
-      return `<div class="context-observation"><div class="context-heading"><strong>${labels[value.kind]}</strong><span class="badge ${value.inspection === 'inspected' ? 'strength' : 'suggestion'}">${states[value.inspection]}</span></div><p>${esc(value.summary || '')}</p>${localImage && !compact ? `<figure><img src="data:${picture.mime_type};base64,${picture.base64}" alt="${esc(picture.alt || 'Saved context preview')}" loading="lazy" decoding="async" referrerpolicy="no-referrer"><figcaption>Saved preview · ${esc(picture.alt || '')}</figcaption></figure>` : ['own_media','parent_media'].includes(value.kind) ? `<p class="context-media-note">${localImage ? 'Saved image available in the full review.' : 'No image preview was saved.'}</p>` : ''}<div class="context-footer">${value.checked_at ? `<time datetime="${esc(value.checked_at)}">Checked ${esc(dateText(value.checked_at,true))}</time>` : '<span>Check date not recorded</span>'}${sourceLink(value.source_url,'Open context source')}</div></div>`;
+      return `<div class="context-observation"><div class="context-heading"><strong>${labels[value.kind]}</strong><span class="badge ${value.inspection === 'inspected' ? 'strength' : 'suggestion'}">${states[value.inspection]}</span></div><p>${esc(value.summary || '')}</p>${mediaPrivacy(value)}${localImage && !compact ? `<figure><img src="data:${picture.mime_type};base64,${picture.base64}" alt="${esc(picture.alt || 'Saved context preview')}" loading="lazy" decoding="async" referrerpolicy="no-referrer"><figcaption>Saved preview · ${esc(picture.alt || '')}</figcaption></figure>` : ['own_media','parent_media'].includes(value.kind) ? `<p class="context-media-note">${localImage ? 'Saved image available in the full review.' : 'No image preview was saved.'}</p>` : ''}<div class="context-footer">${value.checked_at ? `<time datetime="${esc(value.checked_at)}">Checked ${esc(dateText(value.checked_at,true))}</time>` : '<span>Check date not recorded</span>'}${sourceLink(value.source_url,'Open context source')}</div></div>`;
     }).join('')}${observations.length > shown.length ? '<p class="context-media-note">More context is available in the full review.</p>' : ''}</section>`;
   }
   function sourceCard(item, compact = false) {
@@ -979,23 +993,27 @@
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) throw new Error('Enter your email address; a mailbox link does not identify your account.');
       return {handle:raw,url:platform === 'Gmail' ? 'https://mail.google.com/' : 'https://outlook.live.com/mail/'};
     }
-    const routes = {YouTube:['youtube.com','@'],Facebook:['facebook.com',''],Instagram:['instagram.com',''],X:['x.com',''],Reddit:['reddit.com','user/'],TikTok:['tiktok.com','@'],LinkedIn:['linkedin.com','in/'],Substack:['substack.com','@']};
+    const routes = {YouTube:['youtube.com','@'],Facebook:['facebook.com',''],Instagram:['instagram.com',''],X:['x.com',''],Reddit:['reddit.com','user/'],TikTok:['tiktok.com','@'],LinkedIn:['linkedin.com','in/'],Substack:['substack.com','@'],Threads:['threads.com','@']};
     if (/^https?:\/\//i.test(raw)) {
       const parsed = new URL(raw), host = parsed.hostname.replace(/^www\./,'').toLowerCase();
       if (parsed.username || parsed.password || parsed.hash || parsed.protocol !== 'https:') throw new Error('Use the full https profile link, without a password or fragment.');
       const route = routes[platform];
-      const allowed = route && (host === route[0] || platform === 'X' && host === 'twitter.com' || platform === 'Substack' && host.endsWith('.substack.com'));
+      const allowed = route && (host === route[0] || platform === 'X' && host === 'twitter.com' || platform === 'Substack' && host.endsWith('.substack.com') || platform === 'Threads' && host === 'threads.net');
       if (!allowed) throw new Error(`Use a ${platform} profile link, or enter your handle.`);
       const parts = parsed.pathname.split('/').filter(Boolean).map(decodeURIComponent);
       let handle = '';
-      if (platform === 'Reddit' && ['user','u'].includes(parts[0]) && parts.length === 2) handle = parts[1];
+      if (platform === 'Threads') {
+        const profile = /^\/@([A-Za-z0-9._-]{1,200})\/?$/.exec(parsed.pathname);
+        if (parsed.port || !profile) throw new Error('That link does not identify a Threads profile. Paste the profile link or enter your handle.');
+        handle = profile[1];
+      } else if (platform === 'Reddit' && ['user','u'].includes(parts[0]) && parts.length === 2) handle = parts[1];
       else if (platform === 'LinkedIn' && parts[0] === 'in' && parts.length === 2) handle = parts[1];
       else if (platform === 'YouTube' && parts[0] === 'channel' && parts.length === 2) handle = parts[1];
       else if (platform === 'Substack' && host.endsWith('.substack.com') && !parts.length) handle = host.slice(0,-13);
       else if (platform === 'Facebook' && parts[0] === 'profile.php' && parsed.searchParams.get('id')) handle = parsed.searchParams.get('id');
       else if (parts.length === 1 && !['Reddit','LinkedIn'].includes(platform)) handle = parts[0].replace(/^@/,'');
       if (!handle || /^(home|login|accounts|feed|watch|explore|search|settings|i|notifications|profile\.php)$/i.test(handle) || /[\s/?#]/.test(handle)) throw new Error('That link does not identify a profile. Paste the profile link or enter your handle.');
-      return {handle,url:parsed.href};
+      return {handle,url:platform === 'Threads' ? `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}` : parsed.href};
     }
     const handle = raw.replace(/^@/,'').replace(/^u\//,'');
     if (!/^[\p{L}\p{N}_.-]{1,200}$/u.test(handle)) throw new Error('Use a handle without spaces, or paste the full profile link.');

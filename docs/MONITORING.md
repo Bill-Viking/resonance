@@ -8,7 +8,7 @@ The Overview shows the latest saved check. Checks shows recent history, the reco
 
 Daily schedules can record `daily_time` (24-hour HH:MM) and `timezone` (for example America/Los_Angeles), with `ends_at: null` for an ongoing routine. Older metadata without these optional fields remains supported. The assistant scheduler must be updated separately using its automation tool; changing dashboard metadata alone does not reschedule a run.
 
-Account-assisted checks need an awake, unlocked computer, the user's assistant available and valid browser sign-ins. Check every saved platform, including Reddit, with an explicit coverage result. Do not equate a saved account/profile or old excerpt with a current connection. The app's refresh button refreshes saved reports, not provider content. User-selected Keep/Edit/Delete work follows [the action-request contract](ACTIONS.md) and is handled during the scheduled check, with its own verification and confirmation gates.
+Account-assisted checks need an awake, unlocked computer, the user's assistant available and valid browser sign-ins. Check every saved platform, including Reddit and Threads, with an explicit coverage result. A saved Threads account has no built-in reader or direct connection; report only what the assistant actually observed or mark access blocked. Do not equate a saved account/profile or old excerpt with a current connection. The app's refresh button refreshes saved reports, not provider content. User-selected Keep/Edit/Delete work follows [the action-request contract](ACTIONS.md) and is handled during the scheduled check, with its own verification and confirmation gates.
 
 ## Save a report
 

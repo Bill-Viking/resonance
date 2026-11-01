@@ -97,7 +97,7 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   assert.ok(t.html().includes('does not read or send mail'));
   assert.throws(()=>t.ui.readAccountIdentity('Gmail','https://mail.google.com/'),/email address/);
 
-  for (const [platform,signIn] of [['Discord','https://discord.com/login'],['Substack','https://substack.com/sign-in']]) {
+  for (const [platform,signIn] of [['Discord','https://discord.com/login'],['Substack','https://substack.com/sign-in'],['Threads','https://www.threads.com/']]) {
     const provider = setup();
     provider.ui.accountForm(null,platform);
     assert.ok(provider.html().includes(`Step 2 of 4 · ${platform}`));
@@ -118,7 +118,24 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   const click = (action,extra={}) => walk.ui.handleAction({dataset:{action,...extra}});
   const form = (id,values) => ({values,reportValidity:()=>true,getAttribute:()=>id,querySelector:()=>null});
   await click('add-account');
-  for (const platform of ['X','Reddit','YouTube','Discord','Substack']) assert.ok(walk.html().includes(`data-platform="${platform}"`));
+  for (const platform of ['X','Reddit','YouTube','Discord','Substack','Threads']) assert.ok(walk.html().includes(`data-platform="${platform}"`));
+  const threadsCom = walk.ui.readAccountIdentity('Threads','https://www.threads.com/@synthetic.user');
+  assert.equal(threadsCom.handle,'synthetic.user');
+  assert.equal(threadsCom.url,'https://www.threads.com/@synthetic.user');
+  const threadsNet = walk.ui.readAccountIdentity('Threads','https://www.threads.net/@synthetic_user');
+  assert.equal(threadsNet.handle,'synthetic_user');
+  assert.equal(threadsNet.url,'https://www.threads.net/@synthetic_user');
+  const sharedThreads = walk.ui.readAccountIdentity('Threads','https://www.threads.com/@synthetic.user/?xmt=synthetic-value');
+  assert.equal(sharedThreads.handle,'synthetic.user');
+  assert.equal(sharedThreads.url,'https://www.threads.com/@synthetic.user');
+  const threadsHandle = walk.ui.readAccountIdentity('Threads','@synthetic_user');
+  assert.equal(threadsHandle.handle,'synthetic_user');
+  assert.equal(threadsHandle.url,'https://threads.com/@synthetic_user');
+  assert.throws(()=>walk.ui.readAccountIdentity('Threads','https://www.threads.com/@synthetic_user/post/abc'),/Threads profile/);
+  assert.throws(()=>walk.ui.readAccountIdentity('Threads','https://other.example/@synthetic_user'),/Threads profile/);
+  assert.throws(()=>walk.ui.readAccountIdentity('Threads','https://user:password@www.threads.com/@synthetic_user'),/password or fragment/);
+  assert.throws(()=>walk.ui.readAccountIdentity('Threads','https://www.threads.com:8443/@synthetic_user'),/Threads profile/);
+  assert.throws(()=>walk.ui.readAccountIdentity('Threads','https://www.threads.com/@synthetic_user#fragment'),/password or fragment/);
   await click('walk-platform',{platform:'X'});
   await walk.ui.saveForm(form('walk-identity-form',{identity:'https://x.com/river_example'}));
   assert.ok(walk.html().includes('X · river_example'));

@@ -2,7 +2,7 @@
 
 **See what you have said online and how it may land. Fix it in your own voice. Privately, on your own computer.**
 
-`0.1.0-preview.5 · source preview`
+`0.1.0-preview.6 · source preview`
 
 Resonance is a small app that runs on your own computer. It gathers your own posts, comments and replies into one place, marks the exact words that may land badly with the audience of that account, and helps you keep, change or remove each one. It has no account to create, no cloud behind it and no tracking inside it.
 
@@ -37,7 +37,7 @@ Resonance opens on a Welcome page with three doors.
 - **Your assistant brings them.** If you use an AI assistant that can drive a browser and run a command, give it one sentence — *"Read ASSISTANT.md in my Resonance folder and run my Resonance check."* — and it does the rest: it reads your own posts where you are signed in, saves what it found, and your tiles fill in. [ASSISTANT.md](ASSISTANT.md) is the whole contract it follows, written to be read by you too. The short version: your own writing only, never private messages, and nothing on a platform is changed without your yes, at that moment, for that item.
 - **Your own data archive.** Importing a platform's "download your data" file is coming next.
 
-Saved accounts can be on X, Reddit, YouTube, Instagram, Facebook, TikTok, LinkedIn, Discord and Substack, plus Gmail and Outlook mailboxes. Saving an account connects nothing. What Resonance can show depends on what you paste or what your assistant was able to read, and every check says plainly what it covered and what it could not reach.
+Saved accounts can be on X, Reddit, YouTube, Instagram, Facebook, TikTok, LinkedIn, Discord, Substack and Threads, plus Gmail and Outlook mailboxes. Saving an account connects nothing. Threads can be saved by handle or profile link, and appears in ordinary account setup and reports; Resonance has no Threads reader or direct connection. What Resonance can show depends on what you paste or what your assistant was able to read, and every check says plainly what it covered and what it could not reach.
 
 ### Proven with
 
@@ -56,6 +56,14 @@ Resonance is careful about what it claims. Clicking a button never changes a pla
 Before an assistant edit or removal starts, a fresh account check must match the saved identity and the source's author. The action preview shows the intended account, its boundary and the assistant's dated observation together. Missing, mismatched or expired checks hold the action; an alternate account is never substituted automatically. The assistant observes your browser's sign-in through its own tools; Resonance cannot see or monitor that sign-in itself.
 
 Edit availability is checked for each exact post. Cards show the assistant’s dated observation and reason; unknown stays unknown. Assistant edits require fresh available text-edit controls as well as the account match. When editing is unavailable, Res offers Keep, a follow-up reply draft or a separate-post draft. These drafts stay in the current tab for copying and separate review; Res does not publish them or remove the original.
+
+For public writing or artwork you separately ask an assistant to create through
+Resonance, [the authoring workflow](AUTHORING.md) uses RES public credit: a two-line
+text signature with the repository URL for standalone creations, a compact
+signature for short replies, and no added branding when you ask to omit it.
+It keeps internal session labels out of public signatures. Graphic banners are
+used only when requested. This is an assistant workflow, not an automatic
+signature in the app or permission to publish.
 
 ## Accounts and boundaries
 

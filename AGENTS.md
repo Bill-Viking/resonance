@@ -1,6 +1,14 @@
 # Resonance — for AI agents
 
-Two kinds of agent arrive here. Find yours.
+Start with the contract for the work you were asked to do.
+
+## You are preparing public writing or artwork
+
+For a new post, reply, standalone creation or requested attribution, read
+[AUTHORING.md](AUTHORING.md) in full. It defines RES public credit and the contextual
+full text, compact and omit choices; graphics are by explicit request only.
+Internal session plates are not public signatures.
+Preparing a draft does not authorize publication or retroactive changes.
 
 ## You are helping someone use Resonance
 

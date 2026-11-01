@@ -1,0 +1,49 @@
+{
+  "id": "check-media-privacy-example",
+  "started_at": "2026-10-01T18:00:00Z",
+  "completed_at": "2026-10-01T18:09:30Z",
+  "summary": "Synthetic image privacy review; no real account or media.",
+  "accounts": [
+    {
+      "account_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "status": "partial",
+      "checked_at": "2026-10-01T18:04:10Z",
+      "summary": "A synthetic label needs redaction.",
+      "coverage": "One synthetic attachment inspected; no real platform accessed.",
+      "items_reviewed": 1,
+      "deleted_count": 0,
+      "pending_deletion_count": 0,
+      "findings": [
+        {
+          "severity": "attention",
+          "kind": "post",
+          "title": "A mailing label is visible",
+          "detail": "Crop or cover the recipient label before sharing this photo.",
+          "source_url": "https://example.test/posts/privacy-1",
+          "text": "An unexpected delivery.",
+          "quotes": [],
+          "context": [
+            {
+              "kind": "own_media",
+              "inspection": "inspected",
+              "source_url": "https://example.test/posts/privacy-1",
+              "summary": "The foreground envelope has a readable recipient block.",
+              "checked_at": "2026-10-01T18:04:10Z",
+              "privacy": {
+                "status": "sensitive_text",
+                "detail": "The label includes private mailing details and a routing barcode.",
+                "regions": [
+                  {
+                    "category": "address",
+                    "location": "Lower-right recipient block",
+                    "suggestion": "Cover the entire label, including its barcode, with a fully opaque patch or crop it out."
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

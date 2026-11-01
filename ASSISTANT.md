@@ -15,6 +15,14 @@ The user decides everything. You report, and you carry out what they chose.
 
 This contract covers what the user has posted in public. It does not cover email: Resonance can hold mailbox previews, but bringing them in is separate work that this page does not authorize.
 
+If the user separately asks for a new public post, reply, standalone creation or
+attribution, read [AUTHORING.md](AUTHORING.md) before preparing it. That workflow
+uses RES public credit with a full text signature and repository URL, a compact
+reply signature or omitted branding as the context and
+the user's instruction require. It does not add publication authority to this
+contract. Graphic banners require an explicit request. Never append a session plate or signature to collected text or to the
+exact replacement text of an approved edit.
+
 If Gmail or Outlook accounts are saved, they still appear in every report, because every saved account must. Do not open them. Give each one `"status": "blocked"`, `"checked_at": null`, zero counts and no findings, and say in both `summary` and `coverage`: "Outside this public-post check; mail was not read." That states a limit of this check. It does not say the user is signed out.
 
 ## The rules
@@ -75,6 +83,23 @@ Add `--account ID` to read one saved account. Without it the roster includes eve
 
 Read this before judging anything. This edition does not store accepted learned lines or muted-rule preferences: `learning.available` is `false` and explains that limit. Do not invent those preferences or use resolved findings as proof a rule was muted.
 
+For a focused social-account pass, gather its saved context in one read:
+
+```
+python3 monitor.py --review-context --account ID
+```
+
+This includes that account's profile and past choices, its ten latest coverage entries found within the hundred latest saved reports, up to twenty distinct sources from its fifty newest saved reviews, and up to fifty pending request summaries. Past choices use at most one hundred recent saved records per history table; `profile.precedent_history_truncated` says when older history remains. Each limit has a truncation flag. It creates no files, performs no upgrade, and leaves running work unchanged. Missing databases, incompatible schemas, sample mode, unknown accounts and mailboxes are refused. No media previews are returned. Saved words are navigation context, not proof of current wording, complete coverage or permission to act. The full roster still comes from `--profile`; do not omit other saved accounts from the final report.
+
+### A focused Facebook pass
+
+- Use `--review-context` once for the selected account. Open saved exact post links first; use the profile feed only to discover sources not already identified. Keep an available exact-post tab through preparation and verification instead of finding the post again.
+- Read the coverage descriptions, including blocked stretches and uninspected stories. The latest report time is not a reading boundary. If history is truncated, consult earlier private reports when needed. A focused single-post edit does not cover the rest of the feed or stories.
+- For a broad recent-post request, begin with a clearly labeled small sample of up to three unique own sources. Give the first useful finding before extending the pass to its requested boundary. This is an initial batch, not a substitute for completing the requested scope. Count newly inspected items separately from carried-forward history.
+- Inspect the complete caption, relevant thread and each readable attachment together on the exact source. Reuse a previous judgment only after confirming those inputs and the account boundary still match. New context, media or a new concern needs a fresh review. Never infer that a saved photo ID means unchanged pixels.
+- Check the actual edit controls before preparing the exact change. Batch deterministic browser steps where the tools allow it. Carry an explicit approval for that unchanged item and preview through the attempt; do not add discretionary approval loops. Required tool confirmations still apply. Text edits keep every guard below. Photo replacement uses the separate workflow under *Every check includes text inside media*, with its own preview, one attempt and verified receipt.
+- Record preparation, reading, media inspection, judgment and saving durations in the private report's coverage when measuring a pass. Report measured time, not an untested speed claim. Keep routine bookkeeping out of the user's decision flow.
+
 ### 2. See what is waiting
 
 ```
@@ -94,6 +119,16 @@ Saved mailboxes are not read; they get the fixed entry described at the top of t
 3. For anything you may raise, open the item's own page so that you have its whole text and its own permanent link. For a reply, read enough of the thread to understand it.
 4. Count what you actually read. That number is `items_reviewed`.
 5. Note what you could not see: a tab that would not load, a feed that stopped early, images or video you did not inspect, a stretch of time you could not reach. It goes in `coverage`.
+
+### Every check includes text inside media
+
+For every post or story in scope, inspect each attached image at a readable size, including screenshots, labels, documents and background screens. For video, name the frames or interval inspected; a thumbnail does not cover the whole video. Look for mailing addresses and apartment numbers, private phone/email details, identifiers, financial or confidential text, credentials and machine-readable codes such as barcodes and QR codes. A visible code is a possible exposure; do not decode it or follow its destination as part of this check.
+
+Record the number of attachments inspected and any uninspected or unreadable media in account `coverage`. Do this even when there are no findings. Unreadable text stays unchecked; never infer that it is safe. Res itself does not run OCR or inspect pixels: this is your required review step.
+
+Raise exposed private details as `attention`. Describe their type and position without transcribing their values into captions, findings, quotes, alt text or notes. Keep the user's actual caption as `text`; for an image-only concern use `quotes: []` rather than falsely highlighting innocent caption words. Never include a preview containing the exposure in the report. Suggest cropping the whole region or covering it with a fully opaque patch, including associated codes and duplicate details. Preserve the point of the post. Blur, a translucent mark and a caption change are not reliable redaction.
+
+Preparing a copy and changing a live post are separate steps. After the user asks for an edit, preserve the original privately, inspect the flattened output at readable size, and check all edges and other exposures. For an existing post, use an attribution note or banner only when the user requests it for that change; new-creation branding defaults do not authorize retroactive branding. When attribution is requested, follow [AUTHORING.md](AUTHORING.md) and include it in the exact preview. Inspect whether the exact original supports media replacement; a text editor proves nothing about photo replacement. Never silently delete and repost. The current guarded edit request changes text only, so it cannot authorize or record a media replacement. A separately authorized media workflow must retain its exact preview, attempt and verified receipt.
 
 ### 4. Judge how the words may land
 
@@ -255,7 +290,25 @@ For inspected `own_media` or `parent_media` only, an optional `image` object can
 
 Context never becomes the user's authored words, highlighted quotes or learned voice. Describe only what is needed to interpret their reply; do not collect notes about other people. Older reports without this field remain readable and say context was not recorded. Rechecking identical context at a later time preserves its meaning; changes to its source, summary, media or inspection state change the evidence fingerprint and require fresh review. The newest explicitly supplied context for a repeated finding is displayed; earlier observations remain in immutable reports. Source identity alone does not prove authorship: exact X status links support posts and replies, and the signed-in account and live author still require verification before action.
 
-See `examples/report.context.sample.json` for a complete, synthetic example that can be shape-validated.
+For each media observation, include `privacy` with `status`, `detail` and `regions`. Status is `sensitive_text`, `none_seen` or `not_checked`. The detail states the actual scope or limitation (1–1,200 characters). `none_seen` is a bounded observation, never a guarantee. Uninspected/unavailable media can only use `not_checked`. Older observations without this object display “Image privacy not checked.”
+
+`regions` is empty except for `sensitive_text`, which requires one to twelve regions. Each has `category` (`address`, `contact`, `identifier`, `financial`, `credential`, `confidential`, `machine_code` or `other`), `location` (1–300 characters) and `suggestion` (1–600 characters). Describe where and how to redact, never the sensitive value. For example:
+
+```json
+"privacy": {
+  "status": "sensitive_text",
+  "detail": "A recipient label is readable in the foreground image.",
+  "regions": [{
+    "category": "address",
+    "location": "Recipient block at the lower right",
+    "suggestion": "Crop out the whole label or cover it and its barcode with a solid opaque patch."
+  }]
+}
+```
+
+An observation marked `sensitive_text` cannot include an `image` preview. Keep a prepared redacted copy separately in the private data folder; do not represent it as the live source. Privacy observations are evidence and materially changed observations invalidate earlier choices. They grant no edit permission and create no upload or automatic redaction action.
+
+See `examples/report.context.sample.json` and `examples/report.privacy.sample.json` for complete synthetic examples that can be shape-validated.
 
 ## Reserved learning proposal format
 
@@ -312,7 +365,7 @@ If the user asks you in conversation to change a post, ask them to press **Modif
    python3 monitor.py --request REQUEST_ID
    ```
 
-   It prints the `action_request` as it stands now, with `evidence_current`, `identity_current`, `edit_current` and `user_completed`, and changes nothing. Go on only if the request it prints is the one you asked for, its `execution_state` is `running`, its `attempt_id` is the one you were just given, `evidence_current`, `identity_current` and `edit_current` are all exactly `true`, and `user_completed` is exactly `false`. Recheck the browser's active identity and, for an edit, its current edit controls immediately before the provider click; Resonance cannot detect a browser account switch. If it changed or is uncertain, stop even if the saved comparison is fresh. Anything the user did to this post themselves since your attempt began stops you, even if it has already been verified. A missing or unreadable answer is also a stop. Report `blocked` without another provider attempt. Never use `--work` for this last look — it moves a running attempt into verification-only work.
+   It prints the `action_request` as it stands now, with `evidence_current`, `identity_current`, `edit_current` and `user_completed`, and changes nothing. Go on only if the request it prints is the one you asked for, its `execution_state` is `running`, its `attempt_id` is the one you were just given, `evidence_current`, `identity_current` and `edit_current` are all exactly `true`, and `user_completed` is exactly `false`. Recheck the browser's active identity and, for an edit, its current edit controls immediately before the provider click; Resonance cannot detect a browser account switch. If it changed or is uncertain, stop even if the saved comparison is fresh. Anything the user did to this post themselves since your attempt began stops you, even if it has already been verified. A missing or unreadable answer is also a stop. An older request saved without identity history reads as unknown (`identity_current: false`) and never authorizes an action; it does not stop the last look at another request. Report `blocked` without another provider attempt. Never use `--work` for this last look — it moves a running attempt into verification-only work.
 6. **Make the one change.** Only now, while the user's yes still stands. Nothing else on the page.
 7. **Verify on the platform.** For an edit, reload the item and read the new text. For a deletion, confirm that the platform itself shows this item as removed while you are still signed in, and that it is gone from the user's own list. A click, an error page, a page that merely fails to load, or a hidden comment proves nothing.
 8. **Report the outcome** in your report's `requests` list, in the same run.

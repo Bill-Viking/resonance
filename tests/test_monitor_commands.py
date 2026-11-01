@@ -157,6 +157,134 @@ class MonitorCommandTests(unittest.TestCase):
         self.assertEqual(len(all_accounts), 2)
         self.assertNotIn('access_note', all_accounts[0])
 
+    def context_fixture(self):
+        self.fixture(start=False)
+        self.facebook = self.store.mutate('POST', '/api/accounts', {
+            'platform': 'Facebook', 'handle': 'example_writer',
+            'url': 'https://www.facebook.com/example_writer'})[1]['account']
+        self.facebook_review = self.store.mutate('POST', '/api/reviews', {
+            'account_id': self.facebook['id'], 'kind': 'post', 'title': 'Check the label',
+            'excerpt': 'A synthetic joke.', 'severity': 'attention',
+            'finding': 'The lower label needs a privacy review.',
+            'source_url': 'https://www.facebook.com/example_writer/posts/12345'})[1]['review']
+
+    def test_review_context_is_account_scoped_read_only_and_not_execution_authority(self):
+        self.context_fixture()
+        request = self.store.mutate('POST', '/api/action-requests', {
+            'review_id': self.facebook_review['id'], 'action': 'delete'})[1]['action_request']
+        started = start_checked(self.store, request['id'])[1]['action_request']
+        before = self.files()
+        with patch.object(server.Store, 'state', side_effect=AssertionError('full workspace read')), \
+                patch.object(server.Store, 'work', side_effect=AssertionError('work normalization')), \
+                patch.object(server.Store, 'upgrade_database', side_effect=AssertionError('upgrade')):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(monitor.main(['--data-dir', str(self.data), '--review-context',
+                                               '--account', self.facebook['id']]), 0)
+        context = json.loads(output.getvalue())
+        self.assertEqual(before, self.files())
+        self.assertEqual(context['profile']['accounts'][0]['id'], self.facebook['id'])
+        self.assertNotIn(self.account['id'], output.getvalue())
+        self.assertEqual(context['sources'][0]['excerpt'], self.facebook_review['excerpt'])
+        self.assertTrue(context['sources'][0]['precise_source'])
+        self.assertEqual(context['pending_work'][0]['attempt_id'], started['attempt_id'])
+        self.assertEqual(context['pending_work'][0]['execution_state'], 'running')
+        self.assertNotIn('can_execute', output.getvalue())
+        self.assertEqual(context['coverage'], [])
+
+    def test_review_context_preserves_partial_and_blocked_coverage_and_omits_other_accounts(self):
+        self.context_fixture()
+        for n, status in enumerate(('checked', 'partial', 'blocked')):
+            at = '2026-10-01T12:0%d:00Z' % n
+            entries = [dict(account_id=account['id'], status=status,
+                            checked_at=None if status == 'blocked' else at,
+                            summary=summary, coverage=coverage, items_reviewed=0 if status == 'blocked' else 1,
+                            deleted_count=0, pending_deletion_count=0, findings=[])
+                       for account, summary, coverage in
+                       ((self.facebook, 'Synthetic scope.', 'Stories remain unchecked.'),
+                        (self.account, 'Other account summary sentinel.', 'Other account coverage sentinel.'))]
+            self.store.mutate('POST', '/api/monitor-runs', dict(
+                id='context-run-%d' % n, started_at=at, completed_at=at,
+                summary='Synthetic run.', accounts=entries, requests=[]))
+        before = self.files()
+        result = self.cli('--review-context', '--account', self.facebook['id'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        context = json.loads(result.stdout)
+        self.assertEqual([row['status'] for row in context['coverage']], ['blocked', 'partial', 'checked'])
+        self.assertIsNone(context['coverage'][0]['checked_at'])
+        self.assertTrue(all(row['coverage'] == 'Stories remain unchecked.' for row in context['coverage']))
+        self.assertNotIn('sentinel', result.stdout)
+        self.assertNotIn('resume_at', result.stdout)
+        self.assertEqual(before, self.files())
+
+    def test_review_context_deduplicates_sources_and_exposes_its_history_limit(self):
+        self.context_fixture()
+        with self.store.connect() as db:
+            for n in range(52):
+                review = dict(self.facebook_review, id='context-review-%d' % n,
+                              source_url='https://www.facebook.com/example_writer/posts/%d' % (10000 + n // 2),
+                              excerpt='Exact saved text %d' % n)
+                self.store.put(db, 'reviews', server.review_record(review))
+        result = self.cli('--review-context', '--account', self.facebook['id'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        context = json.loads(result.stdout)
+        self.assertEqual(len(context['sources']), 20)
+        self.assertEqual(len({row['source_key'] for row in context['sources']}), 20)
+        self.assertEqual(context['sources'][0]['excerpt'], 'Exact saved text 51')
+        self.assertTrue(context['limits']['source_history_truncated'])
+        self.assertEqual(context['limits']['sources_returned'], 20)
+
+    def test_review_context_bounds_precedent_history_and_rejects_corrupt_coverage_order(self):
+        self.context_fixture()
+        with self.store.connect() as db:
+            for n in range(101):
+                self.store.put(db, 'reviews', server.review_record(dict(
+                    self.facebook_review, id='history-review-%d' % n)))
+        context = json.loads(self.cli('--review-context', '--account', self.facebook['id']).stdout)
+        self.assertTrue(context['profile']['precedent_history_truncated'])
+        at = '2026-10-01T12:00:00Z'
+        self.store.mutate('POST', '/api/monitor-runs', dict(
+            id='ordering-fixture', started_at=at, completed_at=at, summary='Synthetic coverage.',
+            accounts=[dict(account_id=self.facebook['id'], status='partial', checked_at=at,
+                           summary='Synthetic sample.', coverage='Stories unchecked.', items_reviewed=1,
+                           deleted_count=0, pending_deletion_count=0, findings=[]),
+                      dict(account_id=self.account['id'], status='blocked', checked_at=None,
+                           summary='Outside this synthetic check.', coverage='Not inspected.', items_reviewed=0,
+                           deleted_count=0, pending_deletion_count=0, findings=[])], requests=[]))
+        with self.store.connect() as db:
+            db.execute('UPDATE monitor_runs SET completed_epoch=0')
+        before = self.files()
+        result = self.cli('--review-context', '--account', self.facebook['id'])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('coverage disagrees', result.stderr)
+        self.assertEqual(before, self.files())
+
+    def test_review_context_refuses_missing_account_mail_and_samples(self):
+        self.assertEqual(self.cli('--review-context').returncode, 2)
+        self.assertEqual(self.cli('--review-context', '--account', 'unknown').returncode, 1)
+        self.assertFalse(self.data.exists())
+        self.context_fixture()
+        mail = self.store.mutate('POST', '/api/accounts', {'platform': 'Gmail', 'handle': 'example@example.test'})[1]['account']
+        before = self.files()
+        for account_id in ('unknown', mail['id']):
+            self.assertEqual(self.cli('--review-context', '--account', account_id).returncode, 1)
+            self.assertEqual(before, self.files())
+        workspace = server.samples.Workspace(self.data, server.Store)
+        workspace.mutate('POST', '/api/samples', {}, token=workspace.state()['workspace']['token'])
+        before = self.files()
+        result = self.cli('--review-context', '--account', self.facebook['id'])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Samples are showing', result.stderr)
+        self.assertEqual(before, self.files())
+
+    def test_review_context_refuses_incompatible_schema_without_upgrading(self):
+        self.context_fixture()
+        with self.store.connect() as db:
+            db.execute('PRAGMA user_version=999')
+        before = self.files()
+        self.assertEqual(self.cli('--review-context', '--account', self.facebook['id']).returncode, 1)
+        self.assertEqual(before, self.files())
+
     def test_profile_past_choices_use_snapshotted_words_not_a_later_review(self):
         self.fixture(start=False)
         self.store.mutate('POST', '/api/action-requests', {'review_id': self.review['id'], 'action': 'keep'})
@@ -399,6 +527,116 @@ class MonitorCommandTests(unittest.TestCase):
                 snapshot = server.Store(self.data, read_only=True).request_snapshot(self.request['id'])
             self.assertTrue(snapshot['evidence_current'], 'the read must not mix two committed versions')
             self.assertFalse(server.Store(self.data, read_only=True).request_snapshot(self.request['id'])['evidence_current'])
+
+    def strip_identity_history(self, request_id):
+        with self.store.connect() as db:
+            value = self.store.get(db, 'action_requests', request_id)
+            value.pop('identity_check')
+            db.execute('UPDATE action_requests SET data=? WHERE id=?', (json.dumps(value), request_id))
+
+    def legacy_request(self, number, **changes):
+        """An unrelated saved request in the older shape: every field except identity history."""
+        with patch('server.now', return_value='2026-10-01T11:30:00Z'):
+            review = self.store.mutate('POST', '/api/reviews', {
+                'account_id': self.account['id'], 'kind': 'comment', 'title': 'Another comment',
+                'excerpt': 'Another synthetic saved comment.', 'severity': 'attention',
+                'finding': 'A concrete concern.',
+                'source_url': 'https://www.youtube.com/watch?v=example&lc=other' + str(number)})[1]['review']
+            request = self.store.mutate('POST', '/api/action-requests', {
+                'review_id': review['id'], 'action': 'delete'})[1]['action_request']
+        with self.store.connect() as db:
+            value = self.store.get(db, 'action_requests', request['id'])
+            value.update(changes)
+            value.pop('identity_check', None)
+            db.execute('UPDATE action_requests SET data=?,status=? WHERE id=?',
+                       (json.dumps(value), value['status'], request['id']))
+        return request['id']
+
+    def test_request_reads_modern_attempt_beside_legacy_requests_without_identity_history(self):
+        self.fixture(start=False)
+        request = self.store.mutate('POST', '/api/action-requests', {
+            'review_id': self.review['id'], 'action': 'delete'})[1]['action_request']
+        self.request = start_checked(self.store, request['id'])[1]['action_request']
+        modern = self.read_request()
+        self.assertTrue(modern['identity_current'])
+        legacy = {
+            'queued': self.legacy_request(1),
+            'held': self.legacy_request(2, execution_state='blocked', next_move='fix_now',
+                                        blocker_reason='Held for the user.'),
+            'retired': self.legacy_request(3, status='cancelled', execution_state='cancelled'),
+        }
+        before = self.files()
+        again = self.read_request()
+        for key in ('evidence_current', 'identity_current', 'edit_current', 'user_completed'):
+            self.assertEqual(again[key], modern[key], key)
+        self.assertEqual(again['action_request']['execution_state'], 'running')
+        self.assertEqual(again['action_request']['attempt_id'], modern['action_request']['attempt_id'])
+        self.assertEqual(self.files(), before, 'reading must not write, backfill or retire any work')
+        with self.store.connect() as db:
+            for request_id in legacy.values():
+                self.assertNotIn('identity_check', json.loads(
+                    db.execute('SELECT data FROM action_requests WHERE id=?', (request_id,)).fetchone()['data']))
+        # Absent history reads as unknown: no legacy request gains any authority.
+        reader = server.Store(self.data, read_only=True)
+        for name, request_id in legacy.items():
+            with self.subTest(legacy=name):
+                snapshot = reader.request_snapshot(request_id)
+                self.assertFalse(snapshot['identity_current'])
+                self.assertFalse(snapshot['action_request']['can_execute'])
+                self.assertEqual(snapshot['action_request']['identity_preflight']['status'], 'required')
+                self.assertIsNone(snapshot['action_request']['identity_check'])
+        self.assertEqual(self.files(), before)
+
+    def test_request_refuses_a_missing_lifecycle_or_source_field_even_beside_legacy_history(self):
+        self.fixture()
+        other = self.legacy_request(1)
+        original = self.store.path.read_bytes()
+        for field in sorted(server.ACTION_REQUEST_FIELDS - {'identity_check'}):
+            for target in (self.request['id'], other):
+                with self.subTest(field=field, unrelated=target == other):
+                    self.store.path.write_bytes(original)
+                    with self.store.connect() as db:
+                        value = self.store.get(db, 'action_requests', target)
+                        value.pop(field)
+                        db.execute('UPDATE action_requests SET data=? WHERE id=?', (json.dumps(value), target))
+                    before = self.files()
+                    result = self.cli('--request', self.request['id'])
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertEqual(result.stdout, '')
+                    self.assertIn('Required fields are missing', result.stderr)
+                    self.assertEqual(before, self.files())
+
+    def test_queued_target_without_identity_history_is_never_current_and_cannot_start(self):
+        self.fixture(start=False)
+        request = self.store.mutate('POST', '/api/action-requests', {
+            'review_id': self.review['id'], 'action': 'delete'})[1]['action_request']
+        account = next(value for value in self.store.state()['accounts'] if value['id'] == request['account_id'])
+        check = self.store.mutate('POST', '/api/action-requests/' + request['id'] + '/identity-check',
+                                  observation(account, request))[1]['action_request']['identity_check']
+        # The start-guard row for a matching check still exists; the saved history does not.
+        self.strip_identity_history(request['id'])
+        self.request = request
+        before = self.files()
+        snapshot = self.read_request()
+        self.assertFalse(snapshot['identity_current'])
+        self.assertFalse(snapshot['action_request']['can_execute'])
+        self.assertEqual(snapshot['action_request']['identity_preflight']['status'], 'required')
+        self.assertEqual(self.files(), before)
+        with self.assertRaises(server.Invalid):
+            self.store.mutate('POST', '/api/action-requests/' + request['id'] + '/start',
+                              {'identity_check_id': check['id']})
+        started = self.cli('--start-request', request['id'], '--identity-check-id', check['id'])
+        self.assertEqual(started.returncode, 1)
+        with self.store.connect() as db:
+            stored = self.store.get(db, 'action_requests', request['id'])
+        self.assertEqual((stored['execution_state'], stored['attempt_id']), ('queued', None))
+
+    def test_running_target_losing_identity_history_is_not_identity_current(self):
+        self.fixture()
+        self.strip_identity_history(self.request['id'])
+        snapshot = self.read_request()
+        self.assertFalse(snapshot['identity_current'])
+        self.assertEqual(snapshot['action_request']['execution_state'], 'running')
 
 
 if __name__ == '__main__':

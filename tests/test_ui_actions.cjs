@@ -201,6 +201,20 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
   contextItem.findings[0].context[0].image.mime_type='image/svg+xml';
   assert.ok(!contextView.ui.sourceCard(contextItem).includes('<img'),'unsupported image types are not rendered');
   assert.ok(rendered.includes('Conversation and media context were not recorded'));
+  const privacyContext=contextItem.findings[0].context[0];
+  assert.ok(contextView.ui.sourceCard(contextItem).includes('Image privacy not checked'));
+  privacyContext.privacy={status:'sensitive_text',detail:'A recipient label is visible.',regions:[{category:'address',location:'Lower <right>',suggestion:'Cover the label and its barcode.'}]};
+  privacyContext.image.mime_type='image/png';
+  const privacyCard=contextView.ui.sourceCard(contextItem);
+  assert.ok(privacyCard.includes('Sensitive text visible'));
+  assert.ok(privacyCard.includes('Lower &lt;right&gt;'));
+  assert.ok(privacyCard.includes('Cover the label and its barcode.'));
+  assert.ok(privacyCard.includes('Text editing alone does not hide details inside a photo.'));
+  assert.ok(!privacyCard.includes('<img'),'exposed media never renders even if malformed data supplies a preview');
+  privacyContext.privacy={status:'none_seen',detail:'Only the foreground still was inspected.',regions:[]};
+  assert.ok(contextView.ui.sourceCard(contextItem).includes('not a privacy guarantee'));
+  privacyContext.inspection='unavailable';
+  assert.ok(!contextView.ui.sourceCard(contextItem).includes('No sensitive text noticed'));
 
   const queuedCard=()=>queue.ui.sourceCard(queue.ui.state.data.source_items[0]);
   assert.match(queuedCard(),/Asked your assistant to edit · not changed yet · next check .+ · it asks your yes first/);
@@ -537,6 +551,71 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
   unchecked.ui.sourceDetail('source-1');
   assert.ok(unchecked.html().includes('Edit check out of date'));
   assert.ok(!unchecked.html().includes('Reported editable'));
+
+  // Retired request history must not trap a fresh user choice; only genuine same-account pending work does.
+  const retiredCase=({execution='reopened',status='cancelled',pointer='q1',others=[]}={})=>{
+    const r=setup();
+    Object.assign(r.ui.state.data.action_requests[0],{status,execution_state:execution,can_cancel:false,can_execute:false});
+    r.ui.state.data.source_items[0].active_request_id=pointer;
+    r.ui.state.data.action_requests.push(...others.map(extra=>({...structuredClone(r.ui.state.data.action_requests[0]),...extra})));
+    return r;
+  };
+  const expectFreshChoice=(r,label)=>{
+    for(const [action,title,button] of [['edit','Request an edit.','Save edit request'],['delete','Request deletion?','Request deletion']]){
+      const before=r.calls.length;
+      r.ui.assistantRequestDialog('source-1',action);
+      assert.ok(!r.html().includes('already has active work'),`${label}: ${action} is not routed to retired history`);
+      assert.ok(r.html().includes(title)&&r.html().includes(button),`${label}: ${action} offers the fresh-choice dialog`);
+      assert.equal(r.calls.length,before,`${label}: ${action} opens a dialog and saves nothing`);
+    }
+  };
+  const expectBlocked=(r,label)=>{
+    for(const action of ['edit','delete']){
+      r.ui.assistantRequestDialog('source-1',action);
+      assert.ok(r.html().includes('already has active work'),`${label}: ${action} still shows the genuine pending work`);
+      assert.ok(!r.html().includes('Save edit request')&&!r.html().includes('Request deletion?'),`${label}: ${action} does not open a second request`);
+      assert.equal(r.calls.length,0,`${label}: ${action} saves nothing`);
+    }
+  };
+  for(const [execution,status] of [['reopened','cancelled'],['cancelled','cancelled'],['verified','completed'],['reopened','pending']]) {
+    const label=`${status}/${execution}`; // reopened/pending: a stale status must not revive a reopened request
+    expectFreshChoice(retiredCase({execution,status}),`${label} with a stale pointer`);
+    expectFreshChoice(retiredCase({execution,status,pointer:null}),`${label} without a pointer`);
+  }
+  expectFreshChoice(retiredCase({others:[{id:'q-other',account_id:'a2',status:'pending',execution_state:'queued'}],pointer:'q-other'}),'another account\'s queued request behind the pointer');
+  expectFreshChoice(retiredCase({pointer:null,others:[{id:'q-other',account_id:'a2',status:'pending',execution_state:'running'}]}),'another account\'s running request found by fallback');
+  expectFreshChoice(retiredCase({pointer:null,others:[{id:'q-nokey',source_key:'',status:'pending',execution_state:'queued'}]}),'a pending request with no source key');
+  expectFreshChoice(retiredCase({pointer:null,others:[{id:'q-else',source_key:'other-key',status:'pending',execution_state:'queued'}]}),'a pending request for another source');
+
+  for(const execution of ['queued','running','needs_verification','blocked']) {
+    const live={status:'pending',execution_state:execution,can_cancel:execution==='queued',can_execute:execution==='queued'};
+    const pointed=setup();
+    Object.assign(pointed.ui.state.data.action_requests[0],live);
+    expectBlocked(pointed,`${execution} via the pointer`);
+    const fallback=setup();
+    Object.assign(fallback.ui.state.data.action_requests[0],live);
+    fallback.ui.state.data.source_items[0].active_request_id=null;
+    expectBlocked(fallback,`${execution} via fallback`);
+    const behindStale=retiredCase({pointer:'q-old',others:[{id:'q-old',status:'cancelled',execution_state:'reopened',can_cancel:false,can_execute:false}]});
+    Object.assign(behindStale.ui.state.data.action_requests[0],live);
+    behindStale.ui.state.data.action_requests.unshift(behindStale.ui.state.data.action_requests.pop());
+    expectBlocked(behindStale,`${execution} found past a stale pointer to retired history`);
+    const crossAccount=setup();
+    crossAccount.ui.state.data.action_requests[0].account_id='a2';
+    Object.assign(crossAccount.ui.state.data.action_requests[0],live);
+    expectFreshChoice(crossAccount,`${execution} work on another account`);
+  }
+
+  const history=retiredCase({others:[{id:'q-other',account_id:'a2',status:'pending',execution_state:'queued'}]});
+  history.ui.state.data.source_items[0].request_ids=['q1','q-other'];
+  history.ui.sourceDetail('source-1');
+  assert.ok(history.html().includes('data-action="request-detail" data-id="q1"'),'retired history stays listed on the source');
+  history.ui.requestDetail('q1');
+  assert.ok(history.html().includes('Saved request details'),'a retired request can still be inspected');
+  assert.ok(!history.html().includes('data-action="cancel-request"')&&!history.html().includes('data-action="confirm-request"'),'inspecting history offers no cancel or confirm');
+  assert.ok(!history.ui.sourceCard(history.ui.state.data.source_items[0]).includes('Asked your assistant to'),'retired history is not shown as queued work');
+  assert.equal(history.ui.state.data.action_requests[0].status,'cancelled','inspection leaves the retired request unchanged');
+  assert.equal(history.calls.length,0,'history inspection grants no execution and calls no API');
 
   console.log('B1 source UI renderer/handler checks passed (no browser or visual claim).');
 })().catch(error=>{console.error(error);process.exitCode=1;});

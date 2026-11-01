@@ -72,6 +72,34 @@ class MonitoringTests(unittest.TestCase):
         self.assertIsNone(result['accounts'][1]['checked_at'])
         self.assertEqual(result['started_at'], report['started_at'])
 
+    def test_threads_account_accepts_coverage_without_implying_reader_or_action(self):
+        threads = self.store.mutate('POST', '/api/accounts', {
+            'platform': 'Threads', 'handle': 'synthetic_user',
+            'url': 'https://www.threads.com/@synthetic_user'})[1]['account']
+        report = self.report()
+        source = 'https://www.threads.com/@synthetic_user/post/abc'
+        report['accounts'].append(dict(
+            account_id=threads['id'], status='checked', checked_at=report['completed_at'],
+            summary='Synthetic text supplied by an external assistant.',
+            coverage='One synthetic post observed; older history not inspected.',
+            items_reviewed=1, deleted_count=0, pending_deletion_count=0,
+            findings=[dict(severity='suggestion', title='Synthetic review',
+                           detail='Review the wording.', source_url=source, kind='post',
+                           text='This is exact synthetic source text.',
+                           quotes=['exact synthetic source text'])]))
+        self.insert(report)
+        saved = self.store.state()['monitoring']['runs'][0]['accounts'][1]
+        self.assertEqual(saved['account_id'], threads['id'])
+        self.assertEqual(saved['coverage'], report['accounts'][1]['coverage'])
+        self.assertEqual(saved['findings'][0]['source_url'], source)
+        self.assertEqual(saved['findings'][0]['text'], 'This is exact synthetic source text.')
+        self.assertEqual(saved['findings'][0]['quotes'], ['exact synthetic source text'])
+        self.assertIsNone(threads['access_checked_at'])
+        items = [item for item in self.store.state()['source_items'] if item['account_id'] == threads['id']]
+        self.assertEqual(len(items), 1)
+        self.assertFalse(items[0]['precise_source'])
+        self.assertEqual(items[0]['findings'][0]['quotes'], ['exact synthetic source text'])
+
     def test_atomic_rejection_for_bad_rows(self):
         original = self.store.backup()
         variants = []

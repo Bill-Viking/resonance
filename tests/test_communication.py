@@ -57,10 +57,11 @@ class CommunicationTests(unittest.TestCase):
         with self.assertRaises(server.Invalid):
             self.store.mutate('PATCH', '/api/brand', {'api_key': 'secret'})
 
-    def test_discord_substack_profiles_persist_without_implied_access(self):
+    def test_social_profiles_persist_without_implied_access(self):
         for platform, source in (
                 ('Discord', 'https://discord.com/channels/123/456/789'),
-                ('Substack', 'https://example.substack.com/p/sample')):
+                ('Substack', 'https://example.substack.com/p/sample'),
+                ('Threads', 'https://www.threads.com/@synthetic-user/post/abc')):
             with self.subTest(platform=platform):
                 account = self.store.mutate('POST', '/api/accounts', {
                     'platform': platform, 'handle': 'synthetic-user'})[1]['account']

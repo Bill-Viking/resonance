@@ -16,6 +16,8 @@ Show the specific excerpt, why it may violate that account's boundary, and a lin
 
 Local wording checks only cover available text excerpts. They cannot certify an account SFW, inspect video/images or replace contextual judgment. The product must keep unreviewed accounts and missing media coverage visible.
 
+Every assistant-led check includes a sensitive-text review of readable attachments and stories. Saved media observations distinguish sensitive text, none noticed within the inspected scope, and not checked, with concrete crop or opaque-redaction suggestions. Old observations remain unchecked. The external assistant inspects media and prepares requested copies; Res records and displays the evidence. A caption edit cannot fix text inside an image, and this edition's guarded text-edit action does not replace media.
+
 ## Product promise
 
 Give people a clear picture of their communication, understandable feedback on how their words may land, and a short list of useful next actions. Help them express a consistent personal identity while adapting to each audience. Support multiple identities without mixing them. Preserve the user's voice and decisions. Brand preferences are supplied and edited by the user, not inferred personality traits.

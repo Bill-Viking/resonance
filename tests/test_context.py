@@ -86,6 +86,58 @@ class ContextTests(unittest.TestCase):
         item = self.save(self.report('uninspected'))
         self.assertEqual(item['findings'][0]['context'][0]['inspection'], 'not_inspected')
 
+    def privacy(self, status='sensitive_text'):
+        return dict(status=status, detail='A synthetic recipient label is readable.', regions=[
+            dict(category='address', location='Lower right label',
+                 suggestion='Cover the entire label and barcode with a solid patch.')
+        ] if status == 'sensitive_text' else [])
+
+    def test_media_privacy_roundtrip_and_changed_evidence(self):
+        self.context.pop('image')
+        self.context['privacy'] = self.privacy()
+        first = self.save(self.report('privacy'))
+        self.assertEqual(first['findings'][0]['context'][0]['privacy'], self.privacy())
+        request = self.store.mutate('POST', '/api/action-requests', {
+            'review_id': first['review_id'], 'action': 'delete'})[1]['action_request']
+        with tempfile.TemporaryDirectory() as folder:
+            restored = server.Store(folder)
+            restored.mutate('POST', '/api/import', self.store.backup())
+            self.assertEqual(restored.state()['source_items'][0]['findings'][0]['context'][0]['privacy'], self.privacy())
+        self.context['privacy']['regions'][0]['location'] = 'A second label at the upper left'
+        changed = self.save(self.report('privacy-changed', at='2026-10-01T12:01:00Z'))
+        self.assertNotEqual(first['evidence_fingerprint'], changed['evidence_fingerprint'])
+        current = next(r for r in self.store.state()['action_requests'] if r['id'] == request['id'])
+        self.assertFalse(current['can_execute'])
+
+    def test_media_privacy_does_not_upgrade_old_or_uninspected_media(self):
+        old = self.save(self.report('old-media'))
+        self.assertNotIn('privacy', old['findings'][0]['context'][0])
+        self.context.pop('image')
+        self.context.update(inspection='not_inspected', privacy=self.privacy('not_checked'))
+        item = self.save(self.report('unchecked', at='2026-10-01T12:01:00Z'))
+        self.assertEqual(item['findings'][0]['context'][0]['privacy']['status'], 'not_checked')
+        for status in ('none_seen', 'sensitive_text'):
+            self.context['privacy'] = self.privacy(status)
+            with self.assertRaises(server.Invalid):
+                server.monitor_run_record(self.report('false-inspection'), {self.account['id']})
+
+    def test_media_privacy_rejects_exposed_previews_and_malformed_regions(self):
+        self.context['privacy'] = self.privacy()
+        with self.assertRaises(server.Invalid):
+            server.monitor_run_record(self.report('exposed-preview'), {self.account['id']})
+        self.context.pop('image')
+        variants = [dict(status='clear'), dict(regions=[]), dict(regions=[{}]),
+                    dict(regions=self.privacy()['regions'] * 13), dict(detail=''), dict(extra='value')]
+        for change in variants:
+            self.context['privacy'] = dict(self.privacy(), **change)
+            with self.subTest(change=change), self.assertRaises(server.Invalid):
+                server.monitor_run_record(self.report('malformed'), {self.account['id']})
+        self.context['privacy'] = self.privacy('none_seen')
+        server.monitor_run_record(self.report('bounded-clear'), {self.account['id']})
+        self.context['kind'] = 'parent_text'
+        with self.assertRaises(server.Invalid):
+            server.monitor_run_record(self.report('not-media'), {self.account['id']})
+
     def test_invalid_context_and_unsafe_images_are_refused(self):
         account_report = self.report('account-context')
         account_report['accounts'][0]['findings'][0]['kind'] = 'account'

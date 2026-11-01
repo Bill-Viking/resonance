@@ -1,5 +1,38 @@
 # Changes
 
+## 0.1.0-preview.6
+
+This preview brings together the tested account-review improvements and the
+RES text-branding workflow:
+
+- Focused assistant reviews can read one account's saved coverage, exact post
+  links, past choices and pending-work summaries in one read-only command.
+  The Facebook assistant workflow starts from exact sources and batches its
+  first findings. History limits and coverage gaps remain explicit.
+- Assistant-led checks require looking for sensitive text in readable media.
+  Cards show bounded privacy observations and concrete crop or opaque-redaction
+  suggestions. Missing checks stay unknown, and exposed-image previews are
+  refused. Res does not analyze pixels or replace media itself.
+- After an attempted change is verified as still needed, the retired request
+  stays in history and the user can make a fresh choice. Active work still
+  blocks duplicate requests; no old attempt or permission is revived.
+- Older requests without identity history no longer block the final read-only
+  check of a complete modern request. Absent history grants no authority;
+  lifecycle, source, identity and edit-availability safeguards remain required.
+- Threads joins saved account setup and assistant-supplied coverage reports.
+  Copied profile links save without tracking parameters. Saving an account
+  connects nothing; there is no Threads reader or assistant edit/delete support.
+- The app wordmark and header spacing are smaller; icon artwork is unchanged.
+- The new AUTHORING.md workflow uses the RES text signature and actual repository
+  URL for standalone creations, a compact signature for short replies, and no
+  added branding when requested. Graphic banners require an explicit request.
+  This is assistant guidance, not automatic formatting or permission to publish.
+
+The experimental browser extensions, unfinished Facebook reader and automatic
+Check now workflow are not included. Account checks still need an external
+assistant. The app makes no outgoing connections and holds no credentials or
+AI model. Schema 4 and portable backup format 2 are unchanged.
+
 ## 0.1.0-preview.5
 
 Per-post edit availability shows dated assistant observations, concrete reasons

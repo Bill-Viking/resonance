@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 
-ROOT_FILES = frozenset('''AGENTS.md ASSISTANT.md CHANGELOG.md INTEGRATIONS.md LICENSE
+ROOT_FILES = frozenset('''AGENTS.md ASSISTANT.md AUTHORING.md CHANGELOG.md INTEGRATIONS.md LICENSE
 PRODUCT.md README.md SECURITY.md VERSION monitor.py policy.py release.json
 requirements.txt resonance resonance.bat samples.py server.py workflow.py .gitignore'''.split())
 PUBLIC_DIRECTORIES = ('static/', 'examples/', 'tests/', 'mac-launcher/')

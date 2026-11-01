@@ -27,7 +27,7 @@ import webbrowser
 ROOT = Path(__file__).resolve().parent
 MAX_BODY = 2 * 1024 * 1024
 MAX_IMPORT_BODY = 32 * 1024 * 1024
-PLATFORMS = ('YouTube', 'Facebook', 'Instagram', 'X', 'Reddit', 'TikTok', 'LinkedIn', 'Discord', 'Substack', 'Gmail', 'Outlook')
+PLATFORMS = ('YouTube', 'Facebook', 'Instagram', 'X', 'Reddit', 'TikTok', 'LinkedIn', 'Discord', 'Substack', 'Threads', 'Gmail', 'Outlook')
 ACCOUNT_FIELDS = {'id', 'platform', 'handle', 'display_name', 'url', 'access_checked_at', 'access_note', 'created_at', 'identity_mode', 'daring', 'sfw_only'}
 REVIEW_FIELDS = {'id', 'account_id', 'kind', 'title', 'excerpt', 'source_url', 'observed_at', 'reviewed_at', 'sample_count', 'severity', 'finding', 'suggestion', 'origin', 'status', 'snoozed_until', 'updated_at'}
 REVIEW_CORRECTION_FIELDS = {'source_url_correction', 'source_url_corrected_at'}
@@ -677,7 +677,7 @@ def finding_context(finding, completed_at):
         raise Invalid('Finding context must contain one to four observations.')
     for item in context:
         required = {'kind', 'inspection', 'source_url', 'summary', 'checked_at'}
-        fields(item, required | {'image'}, required)
+        fields(item, required | {'image', 'privacy'}, required)
         choice(item['kind'], ('own_media', 'parent_text', 'parent_media', 'thread'), 'context kind')
         choice(item['inspection'], ('inspected', 'not_inspected', 'unavailable'), 'context inspection')
         url(item['source_url'])
@@ -685,6 +685,8 @@ def finding_context(finding, completed_at):
         timestamp(item['checked_at'])
         if instant(item['checked_at']) > instant(completed_at):
             raise Invalid('Context cannot be checked after the report completed.')
+        if 'privacy' in item:
+            media_privacy_record(item)
         if 'image' not in item:
             continue
         if item['inspection'] != 'inspected' or item['kind'] not in ('own_media', 'parent_media'):
@@ -705,6 +707,30 @@ def finding_context(finding, completed_at):
                       'image/webp': raw.startswith(b'RIFF') and raw[8:12] == b'WEBP'}
         if not signatures[picture['mime_type']]:
             raise Invalid('Context image bytes do not match the declared type.')
+
+
+def media_privacy_record(context):
+    """Validate an assistant's observation; this does not inspect image pixels."""
+    if context['kind'] not in ('own_media', 'parent_media'):
+        raise Invalid('A media privacy check belongs to an image or video observation.')
+    value = context['privacy']
+    fields(value, {'status', 'detail', 'regions'}, {'status', 'detail', 'regions'})
+    choice(value['status'], ('sensitive_text', 'none_seen', 'not_checked'), 'media privacy status')
+    string(value['detail'], 'Media privacy detail', 1200, True)
+    if context['inspection'] != 'inspected' and value['status'] != 'not_checked':
+        raise Invalid('Uninspected media cannot claim a privacy check.')
+    if type(value['regions']) is not list or len(value['regions']) > 12:
+        raise Invalid('A media privacy check allows at most twelve regions.')
+    if bool(value['regions']) != (value['status'] == 'sensitive_text'):
+        raise Invalid('Only sensitive-text observations require redaction regions.')
+    for region in value['regions']:
+        fields(region, {'category', 'location', 'suggestion'}, {'category', 'location', 'suggestion'})
+        choice(region['category'], ('address', 'contact', 'identifier', 'financial',
+                                   'credential', 'confidential', 'machine_code', 'other'), 'privacy category')
+        string(region['location'], 'Sensitive region location', 300, True)
+        string(region['suggestion'], 'Suggested redaction', 600, True)
+    if value['status'] == 'sensitive_text' and 'image' in context:
+        raise Invalid('Do not attach a preview of media with exposed sensitive text.')
 
 
 def monitor_run_record(data, account_ids):
@@ -1748,9 +1774,11 @@ class Store:
                 raise Invalid('Saved record details are unreadable; no action can proceed.')
             record = strict_json(row['data'].encode('utf-8'))
             # The normal loader fills legacy fields for compatibility. A last look
-            # must not invent a missing lifecycle or source field instead.
+            # must not invent a missing lifecycle or source field instead. Only
+            # identity history may be absent: it reads as unknown (null) and
+            # never grants authority.
             if table == 'action_requests':
-                fields(record, ACTION_REQUEST_FIELDS, ACTION_REQUEST_FIELDS)
+                fields(record, ACTION_REQUEST_FIELDS, ACTION_REQUEST_FIELDS - {'identity_check'})
             record = validator(record)
             for column in row.keys():
                 if column in record and row[column] != record[column]:
@@ -1776,48 +1804,129 @@ class Store:
             return Store(self.directory, read_only=True).profile_snapshot(account_id)
         with self.connect() as db:
             db.execute('BEGIN')
-            if db.execute('PRAGMA user_version').fetchone()[0] != len(MIGRATIONS):
-                raise Invalid('This database needs the matching app version before its profile can be read.')
-            accounts = self.readonly_records(db, 'accounts', account_record)
-            selected = [account for account in accounts if account_id is None or account['id'] == account_id]
-            if account_id is not None and not selected:
-                raise Invalid('The requested profile account does not exist.')
-            brand_row = db.execute('SELECT data FROM communication_brand WHERE id=1').fetchone()
-            if brand_row is None:
-                raise Invalid('The saved brand profile is missing.')
-            brand = brand_record(strict_json(brand_row[0].encode('utf-8')))
-            social = {account['id']: account for account in selected
-                      if account['platform'] not in ('Gmail', 'Outlook')}
-            kept, changed = [], []
-            if social:
-                placeholders = ','.join('?' for _ in social)
-                def records(table, validator):
-                    rows = db.execute(f'SELECT * FROM {table} WHERE account_id IN ({placeholders})', tuple(social))
-                    result = []
-                    for row in rows:
-                        value = validator(strict_json(row['data'].encode('utf-8')))
-                        if any(row[key] != value[key] for key in row.keys() if key in value):
-                            raise Invalid('Saved profile decisions disagree with their indexed records.')
-                        result.append(value)
-                    return result
-                reviews = records('reviews', review_record)
-                review_map = {review['id']: review for review in reviews}
-                for table, validator in (('action_requests', action_request_record), ('attestations', attestation_record)):
-                    for record in records(table, validator):
-                        if record['execution_state'] != 'verified':
-                            continue
-                        review = review_map.get(record['review_id'])
-                        destination = kept if record['action'] == 'keep' else changed
-                        destination.append(dict(account_id=record['account_id'], action=record['action'],
-                                            title=review['title'] if review else 'Saved change',
-                                            excerpt=record['original_excerpt'][:500], source_url=record['source_url'],
-                                            decided_at=record.get('verified_at') or record.get('completed_at') or record.get('updated_at') or record['done_at']))
-            latest = lambda values: sorted(values, key=lambda value: instant(value['decided_at']), reverse=True)[:30]
-            keys = ('id', 'platform', 'handle', 'display_name', 'url', 'identity_mode', 'daring', 'sfw_only')
-            return {'accounts': [{key: account[key] for key in keys} for account in selected],
-                    'brand': brand, 'precedents': {'kept': latest(kept), 'changed': latest(changed)},
-                    'learning': {'available': False, 'detail': 'Accepted learned lines and muted-rule preferences are not stored by this edition. --learn is unavailable.'},
-                    'scope_note': 'Saved settings and historical social choices only. No live account access or new action is authorized. Mail and private messages were not read.'}
+            return self._profile_snapshot(db, account_id)
+
+    def _profile_snapshot(self, db, account_id, history_limit=None):
+        if db.execute('PRAGMA user_version').fetchone()[0] != len(MIGRATIONS):
+            raise Invalid('This database needs the matching app version before its profile can be read.')
+        accounts = self.readonly_records(db, 'accounts', account_record)
+        selected = [account for account in accounts if account_id is None or account['id'] == account_id]
+        if account_id is not None and not selected:
+            raise Invalid('The requested profile account does not exist.')
+        brand_row = db.execute('SELECT data FROM communication_brand WHERE id=1').fetchone()
+        if brand_row is None:
+            raise Invalid('The saved brand profile is missing.')
+        brand = brand_record(strict_json(brand_row[0].encode('utf-8')))
+        social = {account['id']: account for account in selected
+                  if account['platform'] not in ('Gmail', 'Outlook')}
+        kept, changed = [], []
+        history_truncated = False
+        if social:
+            placeholders = ','.join('?' for _ in social)
+            def records(table, validator):
+                nonlocal history_truncated
+                query = f'SELECT * FROM {table} WHERE account_id IN ({placeholders})'
+                params = tuple(social)
+                if history_limit is not None:
+                    query += ' ORDER BY rowid DESC LIMIT ?'
+                    params += (history_limit + 1,)
+                rows = db.execute(query, params).fetchall()
+                if history_limit is not None:
+                    history_truncated |= len(rows) > history_limit
+                    rows = rows[:history_limit]
+                result = []
+                for row in rows:
+                    value = validator(strict_json(row['data'].encode('utf-8')))
+                    if any(row[key] != value[key] for key in row.keys() if key in value):
+                        raise Invalid('Saved profile decisions disagree with their indexed records.')
+                    result.append(value)
+                return result
+            reviews = records('reviews', review_record)
+            review_map = {review['id']: review for review in reviews}
+            for table, validator in (('action_requests', action_request_record), ('attestations', attestation_record)):
+                for record in records(table, validator):
+                    if record['execution_state'] != 'verified':
+                        continue
+                    review = review_map.get(record['review_id'])
+                    destination = kept if record['action'] == 'keep' else changed
+                    destination.append(dict(account_id=record['account_id'], action=record['action'],
+                                        title=review['title'] if review else 'Saved change',
+                                        excerpt=record['original_excerpt'][:500], source_url=record['source_url'],
+                                        decided_at=record.get('verified_at') or record.get('completed_at') or record.get('updated_at') or record['done_at']))
+        latest = lambda values: sorted(values, key=lambda value: instant(value['decided_at']), reverse=True)[:30]
+        keys = ('id', 'platform', 'handle', 'display_name', 'url', 'identity_mode', 'daring', 'sfw_only')
+        result = {'accounts': [{key: account[key] for key in keys} for account in selected],
+                'brand': brand, 'precedents': {'kept': latest(kept), 'changed': latest(changed)},
+                'learning': {'available': False, 'detail': 'Accepted learned lines and muted-rule preferences are not stored by this edition. --learn is unavailable.'},
+                'scope_note': 'Saved settings and historical social choices only. No live account access or new action is authorized. Mail and private messages were not read.'}
+        if history_limit is not None:
+            result['precedent_history_truncated'] = history_truncated
+        return result
+
+    def review_context(self, account_id):
+        """Bounded navigation history, not a live review or execution permit."""
+        identifier(account_id)
+        if not self.read_only:
+            return Store(self.directory, read_only=True).review_context(account_id)
+        with self.connect() as db:
+            db.execute('BEGIN')
+            profile = self._profile_snapshot(db, account_id, history_limit=100)
+            account = profile['accounts'][0]
+            if account['platform'] in ('Gmail', 'Outlook'):
+                raise Invalid('Review context is for social accounts only; mail is not read.')
+
+            # SQL bounds the saved evidence read. Never use state(), which also
+            # loads mail and normalizes abandoned attempts.
+            review_rows = db.execute('SELECT * FROM reviews WHERE account_id=? ORDER BY rowid DESC LIMIT 51',
+                                     (account_id,)).fetchall()
+            sources, seen = [], set()
+            for row in review_rows[:50]:
+                review = review_record(strict_json(row['data'].encode('utf-8')))
+                if review['id'] != row['id'] or review['account_id'] != account_id:
+                    raise Invalid('Saved review context disagrees with its indexed account or item.')
+                identity = workflow.review_source_identity(account, review)
+                if identity['source_key'] in seen:
+                    continue
+                seen.add(identity['source_key'])
+                sources.append({**identity, **{key: review[key] for key in
+                    ('id', 'title', 'kind', 'excerpt', 'finding', 'reviewed_at')}})
+
+            # Keep coverage separate from findings. An empty, partial or blocked
+            # report is never promoted to a completed reading boundary.
+            coverage = []
+            run_rows = db.execute('SELECT id,completed_epoch,data FROM monitor_runs ORDER BY completed_epoch DESC,rowid DESC LIMIT 101').fetchall()
+            for row in run_rows[:100]:
+                run = monitor_run_record(strict_json(row['data'].encode('utf-8')), None)
+                if run['id'] != row['id'] or instant(run['completed_at']).timestamp() != row['completed_epoch']:
+                    raise Invalid('Saved coverage disagrees with its indexed report.')
+                for entry in run['accounts']:
+                    if entry['account_id'] == account_id:
+                        coverage.append({'run_id': run['id'], 'completed_at': run['completed_at'],
+                                         **{key: entry[key] for key in
+                                         ('status', 'checked_at', 'summary', 'coverage', 'items_reviewed')}})
+
+            work = []
+            work_rows = db.execute('SELECT * FROM action_requests WHERE account_id=? AND status=? ORDER BY rowid DESC LIMIT 51',
+                                   (account_id, 'pending')).fetchall()
+            for row in work_rows[:50]:
+                request = action_request_record(strict_json(row['data'].encode('utf-8')))
+                if any(row[key] != request[key] for key in ('id', 'account_id', 'status', 'source_url')):
+                    raise Invalid('Saved work context disagrees with its indexed record.')
+                work.append({key: request[key] for key in
+                             ('id', 'action', 'source_url', 'execution_state', 'attempt_id',
+                              'blocker_reason', 'next_move', 'updated_at')})
+
+            return {'profile': profile, 'coverage': coverage[:10], 'sources': sources[:20], 'pending_work': work,
+                    'limits': {'coverage_returned': len(coverage[:10]),
+                               'coverage_history_truncated': len(coverage) > 10 or len(run_rows) > 100,
+                               'sources_returned': len(sources[:20]),
+                               'source_history_truncated': len(sources) > 20 or len(review_rows) > 50,
+                               'pending_work_truncated': len(work_rows) > 50},
+                    'scope_note': 'Saved navigation context only, not a new review, a complete account history or permission to act. '
+                                  'Read the coverage descriptions; do not infer a resume date from the latest report time. '
+                                  'Open exact source links first. Recheck live words, relevant thread and every attachment before reusing judgment. '
+                                  'Use --work and --request for guarded actions; running or attempted work is verification only. '
+                                  'No mail or private messages were loaded. Media previews are omitted; no live provider was contacted.'}
 
     def request_snapshot(self, request_id):
         """One read transaction for the final look; never normalize or retire work."""
