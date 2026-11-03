@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import re
-from urllib.parse import parse_qsl, unquote_plus, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
@@ -99,6 +99,64 @@ def precise_source(value, platform="", kind="post"):
         return base and ((kind == "post" and not query.get("comment_id")) or
                          (kind in {"comment", "reply"} and bool(query.get("comment_id"))))
     return False
+
+
+def precise_comment_source(value, platform, kind):
+    """Read-only inbox links; does not broaden the edit/delete target guard."""
+    if kind not in {'comment', 'reply'}:
+        return False
+    if precise_source(value, platform, kind):
+        return True
+    part = urlsplit(normalize_source(value))
+    if platform.casefold() == 'facebook' and part.hostname in {'facebook.com', 'www.facebook.com', 'm.facebook.com'}:
+        query = dict(parse_qsl(part.query, keep_blank_values=True))
+        return bool(re.fullmatch(r'/groups/[^/]+/permalink/[^/]+/?', part.path) and query.get('comment_id'))
+    return False
+
+
+def comment_source_key(value):
+    """Canonical key for one exact comment link: no tracking, fragment or trailing slash."""
+    part = urlsplit(normalize_source(value))
+    query = parse_qsl(part.query, keep_blank_values=True)
+    if (part.hostname or '').lower() in {'facebook.com', 'www.facebook.com', 'm.facebook.com'}:
+        ids = dict(query)
+        comment_id = ids.get('reply_comment_id') or ids.get('comment_id')
+        if comment_id:
+            return 'https://www.facebook.com/?' + urlencode({'comment_id': comment_id})
+    query = sorted((key, value) for key, value in query if key not in {'__cft__', '__cft__[0]', '__tn__'})
+    return urlunsplit((part.scheme, part.netloc, part.path.rstrip("/") or "/", urlencode(query), ""))
+
+
+def comment_author_matches(account, source_url):
+    """Only X embeds the reply author's handle; other comment paths name the parent author.
+
+    This is a conflict check, never proof. Intake must separately compare observed
+    comment-author identity against the saved account.
+    """
+    return account.get('platform', '').casefold() != 'x' or source_author_matches(account, source_url)
+
+
+# The name is spelled out by case so that no Unicode case folding can widen it.
+# After it comes address punctuation or whitespace; a dash counts only when
+# spaced, so "RES-based" is prose. Anything before the address (a quote mark,
+# a signature dash, another word) leaves it unaddressed.
+_RES_ADDRESS = re.compile(
+    r"^\s*(?:[Hh][Ee][Yy][\s,]+)?@?[Rr][Ee][Ss](?:\s*[:,;!?]+\s*|\s+(?:[–—-]+\s+)?)(?P<request>\S.*)$",
+    re.DOTALL)
+_RES_SIGNATURE = "your personal brand assistant"
+
+
+def res_address(text):
+    """The request after a leading RES address, or None when the text is not addressed to RES."""
+    if not isinstance(text, str):
+        return None
+    match = _RES_ADDRESS.match(text)
+    if not match:
+        return None
+    request = match.group("request").strip()
+    if not re.search(r"\w", request) or request.casefold().startswith(_RES_SIGNATURE):
+        return None
+    return request
 
 
 def source_identity(account, source_url, unique_hint, kind="post"):

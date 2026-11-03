@@ -1,5 +1,35 @@
 # Changes
 
+## Unreleased
+
+## 0.1.0-preview.7 — source preview
+
+- A self-contained desktop candidate opens Resonance without a separate Python
+  installation, with Open and Quit controls and a plain occupied-address error.
+  Builds are native to Mac or Windows. Signing, store distribution and physical
+  first-user acceptance remain pending; this source preview is not a finished desktop release.
+- The separate Resonance Reader candidate supports explicit own-account
+  discovery and bounded Check now reads for X posts and YouTube comments.
+  A discovered identity is saved only after confirmation and account boundaries.
+  Instagram, Substack and other saved platforms retain manual and assistant routes.
+- Check now keeps Reading and Saving separate, records dated coverage receipts,
+  exposes exact saved text and revisions, and reconciles a lost save response
+  before retrying. Cancellation or disconnection discards unsaved results.
+  The reader never changes anything on a platform and has no store listing yet.
+- Paste my first post continues through account setup to the resulting review.
+- Database schema 6 and portable backup format 3 preserve reader receipts and
+  exact-text history. Old backups still import. Restore validates the meaning
+  and links of records, not just their hashes. An upgrade retains its original
+  pre-upgrade snapshot even when several migration steps run.
+
+- A public comment or reply you leave addressed to RES (`RES: …`, `Hey RES, …`,
+  `@RES …`) can be brought in by your assistant as a local review request, with
+  an evaluation and an optional proposed reply or edit. Nothing watches your
+  accounts and nothing is triggered instantly; assistant checks and imports are
+  required. A request is a note: it grants no access, posts nothing, and leaves
+  every edit, deletion and reply guard unchanged. Adds database schema 5 and an
+  optional `request_inbox` key in backups, retained in format 3.
+
 ## 0.1.0-preview.6
 
 This preview brings together the tested account-review improvements and the

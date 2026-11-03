@@ -82,6 +82,17 @@ A finding may also carry `text` and `quotes`. Both are optional; a report that o
 
 All reports remain in SQLite; the interface receives the newest 30. Backups include the complete saved monitoring history and configuration. Import accepts up to 32 MB with full validation before writes; ordinary API mutations remain limited to 2 MB. Older backups without monitoring fields preserve existing reports. Importing schedule metadata does not create, start or restore a host automation. Browser offline storage continues to cache only the public application shell, never reports or private API responses.
 
+## RES-addressed comment requests
+
+These are separate from reports, findings and action requests. The assistant imports a public own comment or reply that leads with an address to RES; `monitor.py --res-intake FILE` saves the batch all or nothing, `--res-inbox` reads it and `--res-update FILE` records a local state. [ASSISTANT.md](../ASSISTANT.md) gives the file shapes, limits and rules.
+
+- One row exists per saved account and canonical exact comment link (known tracking parameters, fragment and trailing slash ignored; query order normalized). Facebook comment IDs, or leaf reply IDs when present, identify the same comment across parent routes. Identity evidence is an assistant-reported, dated claim compared with the saved account, not platform attestation. A parent author's name in the URL is not mistaken for the comment author; X reply URLs must name the saved account.
+- The same words read again update only when they were last seen. Changed words keep the earlier version, evaluation and outcome in history (the last ten) and return the request to needs review at the next revision. An older reading never replaces a newer one.
+- States are needs review, prepared, done and dismissed; done is final. They are local notes. They create no action request, identity check or start guard, and publish nothing.
+- The newest 50 matching requests are listed by `--res-inbox`, with counts for every state. Today shows up to four open requests. Neither refreshes by itself; both show what has been imported.
+- Backups carry the inbox in the optional `request_inbox` key (format 2). Import validates every record and refuses the whole backup on any error; older saved decisions are never rolled back.
+- Backups are format 3. Formats 1 and 2 still import. Format 3 adds the reader-check receipts, exact-text corpus and revisions described under [Reader-check intake](#reader-check-intake-candidate).
+
 ## Exact-target outcomes and interrupted actions
 
 The post-action workflow is defined in [ACTIONS.md](ACTIONS.md). A daily check uses the same report command; no extra scheduler or dispatch channel is created.
@@ -147,3 +158,11 @@ A newer conflicting report revokes the old combined start check. A later report
 that says editing is available cannot revive it; inspect again and save a new
 request-bound observation while the request is still queued. Attempted work stays
 verification-only. The report retains its dated history without execution authority.
+
+## Reader-check intake (candidate)
+
+A separate record family, independent of assistant reports, for a browser reader that reads at most three recent own X posts or YouTube comments per account. The candidate connects Today and account controls to `POST /api/checks/begin`, `/api/checks/cancel` and `/api/checks`; receipts and saved text use `GET /api/checks/<id>` and `/api/corpus`. Reader-store installation remains pending. A check runs only after a deliberate click, never on a schedule or page reload. Receipts say what the reader reported; they are neither an assistant report nor proof. See [SECURITY.md](../SECURITY.md) for the guards and [PRODUCT.md](../PRODUCT.md) for scope.
+
+- A receipt records, per account, the status (`ok`, `held`, `error`, `unsupported`), observed identity, source and finding counts, explicit coverage (limit, examined, skipped reasons, `more_available`, `partial`, notes) and gaps. Zero rule matches never means an account is safe.
+- The corpus keeps every accepted item, clean or not, as exact text with its revision history. Only items with local rule matches become ordinary review evidence.
+- Assistant reports, actions, mail and decisions are untouched.

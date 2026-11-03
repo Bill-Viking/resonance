@@ -1,0 +1,48 @@
+name: Desktop candidate
+# Manual only. This builds unsigned candidate archives as build evidence. It creates no
+# release, uses no secrets or signing identity, and publishes nothing. A green run is not
+# proof that a person on a real Windows or Mac computer could install and use Resonance.
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  candidate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements.txt -r desktop/requirements-build.txt
+      - run: python -m unittest discover -s tests
+      - run: node tests/test_ui_actions.cjs
+      - run: node tests/test_ui_communication.cjs
+      - run: node tests/test_ui_today.cjs
+      - run: node tests/test_ui_reader.cjs
+      - run: node tests/test_browser_reader.cjs
+      - run: node tests/test_reader_discovery.cjs
+      - run: node tests/test_reader_pipeline.cjs
+      # Exports only the public allowlist outside this checkout, then runs that export's own suites.
+      - run: python tools/make_release.py --version "$(tr -d '[:space:]' < VERSION)" --out "$RUNNER_TEMP/runtime"
+      - run: python tools/build_desktop.py --runtime "$RUNNER_TEMP/runtime" --out "$RUNNER_TEMP/candidate" --plan
+      - run: python tools/build_desktop.py --runtime "$RUNNER_TEMP/runtime" --out "$RUNNER_TEMP/candidate"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resonance-candidate-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/candidate/*.zip
+            ${{ runner.temp }}/candidate/BUILD-MANIFEST.json
+          if-no-files-found: error
+          retention-days: 14

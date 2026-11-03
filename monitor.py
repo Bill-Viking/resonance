@@ -7,7 +7,7 @@ import sqlite3
 import sys
 import samples
 
-from server import (Invalid, MAX_BODY, Store, data_directory, safe_data_directory,
+from server import (Invalid, MAX_BODY, Store, data_directory, identifier, safe_data_directory,
                     strict_json, validate_monitor_document)
 
 
@@ -39,7 +39,11 @@ def main(argv=None):
     operation.add_argument('--start-request', metavar='ID', help='Durably start one safe queued request before any provider action')
     operation.add_argument('--profile', action='store_true', help='Read saved account boundaries, brand and past social choices without changing data')
     operation.add_argument('--review-context', action='store_true', help='Read one social account’s saved coverage, exact sources and work history without changing data')
-    parser.add_argument('--account', metavar='ID', help='Select one account for --profile or --review-context')
+    operation.add_argument('--res-intake', type=Path, metavar='FILE', help='Save assistant-read public comments addressed to RES as local review requests from a private JSON file; nothing is run or published')
+    operation.add_argument('--res-inbox', action='store_true', help='Read saved RES-addressed requests without changing data')
+    operation.add_argument('--res-update', type=Path, metavar='FILE', help='Record a local evaluation, proposal or state change for one saved RES request from a private JSON file')
+    parser.add_argument('--account', metavar='ID', help='Select one account for --profile, --review-context or --res-inbox')
+    parser.add_argument('--state', choices=('pending', 'needs_review', 'prepared', 'done', 'dismissed', 'all'), default=None, help='Requests to list with --res-inbox (default: pending, meaning needs_review and prepared)')
     parser.add_argument('--observation', type=Path, help='Private identity observation JSON; required with --check-identity')
     parser.add_argument('--identity-check-id', metavar='ID', help='Current matching check ID; required with --start-request')
     args = parser.parse_args(argv)
@@ -47,21 +51,34 @@ def main(argv=None):
         parser.error('--check-identity requires --observation FILE; --observation is only for that command')
     if bool(args.start_request) != bool(args.identity_check_id):
         parser.error('--start-request requires --identity-check-id ID; that flag is only for a start')
-    if args.account is not None and not (args.profile or args.review_context):
-        parser.error('--account is available only with --profile or --review-context')
+    if args.account is not None and not (args.profile or args.review_context or args.res_inbox):
+        parser.error('--account is available only with --profile, --review-context or --res-inbox')
+    if args.state is not None and not args.res_inbox:
+        parser.error('--state is available only with --res-inbox')
     if args.review_context and not args.account:
         parser.error('--review-context requires --account ID')
     try:
         if args.validate:
             print(json.dumps(validate_monitor_document(read_document(args.validate, private=False)), ensure_ascii=False))
             return 0
-        document = read_document(args.report or args.config or args.observation) if args.report or args.config or args.observation else None
+        source_file = args.report or args.config or args.observation or args.res_intake or args.res_update
+        document = read_document(source_file) if source_file else None
         directory = safe_data_directory(args.data_dir) if args.data_dir is not None else data_directory()
-        read_only = args.request is not None or args.profile or args.review_context
+        read_only = args.request is not None or args.profile or args.review_context or args.res_inbox
         guard = samples.read_only_real_workspace if read_only else samples.real_workspace
         with guard(directory):
             store = Store(directory, read_only=read_only)
-            if args.review_context:
+            if args.res_inbox:
+                result_json = json.dumps(store.inbox_snapshot(args.account, args.state or 'pending'), ensure_ascii=False)
+            elif args.res_intake:
+                _, result = store.mutate('POST', '/api/request-inbox/intake', document)
+                result_json = json.dumps(result, ensure_ascii=False)
+            elif args.res_update:
+                if type(document) is not dict:
+                    raise Invalid('Expected a JSON object.')
+                _, result = store.mutate('PATCH', '/api/request-inbox/' + identifier(document.get('id')), {key: value for key, value in document.items() if key != 'id'})
+                result_json = json.dumps(result, ensure_ascii=False)
+            elif args.review_context:
                 result_json = json.dumps(store.review_context(args.account), ensure_ascii=False)
             elif args.profile:
                 result_json = json.dumps(store.profile_snapshot(args.account), ensure_ascii=False)

@@ -1,0 +1,5 @@
+# Build tools for the self-contained desktop candidate. Not needed to run Resonance
+# from source and never installed on a person's computer. Install these into the
+# Python 3.11 (with Tk, such as python.org's) that runs tools/build_desktop.py.
+pyinstaller==6.22.3
+tzdata==2026.2

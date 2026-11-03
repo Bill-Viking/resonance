@@ -115,23 +115,26 @@ class MigrationTests(unittest.TestCase):
             server.Store(self.folder)
         self.assertEqual(observed, list(range(7)))
         self.assertEqual(len(self.backups()), 5)
-        self.assertEqual([snapshot(p)[0] for p in self.backups()], list(range(2, 7)))
+        self.assertEqual([snapshot(p)[0] for p in self.backups()], [0, 3, 4, 5, 6])
         with closing(sqlite3.connect(path)) as db:
             self.assertEqual(db.execute('SELECT number FROM sequence').fetchall(), [(n,) for n in range(1, 8)])
 
-    def test_backup_versions_one_and_two_import_without_clearing_omitted_collections(self):
+    def test_backup_versions_one_two_and_three_import_without_clearing_omitted_collections(self):
         store = server.Store(self.folder)
         exported = store.backup()
-        self.assertEqual(exported['schema_version'], 2)
+        self.assertEqual(exported['schema_version'], 3)
         store.mutate('PATCH', '/api/monitoring', {'scope': 'Synthetic retained scope'})
-        for version in (1, 2):
+        for version in (1, 2, 3):
             body = copy.deepcopy(exported)
             body['schema_version'] = version
+            if version < 3:
+                for key in ('reader_checks', 'reader_sources', 'reader_revisions'):
+                    body.pop(key)
             body.pop('monitoring')
             body.pop('communication')
             self.assertEqual(store.mutate('POST', '/api/import', body)[0], 200)
             self.assertEqual(store.backup()['monitoring']['config']['scope'], 'Synthetic retained scope')
-        for version in (True, 0, 3, '2'):
+        for version in (True, 0, 4, '2'):
             with self.assertRaisesRegex(server.Invalid, 'Unsupported backup version'):
                 store.mutate('POST', '/api/import', dict(exported, schema_version=version))
 
@@ -155,6 +158,8 @@ class MigrationTests(unittest.TestCase):
             store.mutate('PATCH', '/api/monitoring', {'youtube_action': 'A', 'action_scope': 'B'})
         body = store.backup()
         body['schema_version'] = 1
+        for key in ('reader_checks', 'reader_sources', 'reader_revisions'):
+            body.pop(key)
         body['monitoring']['config']['youtube_action'] = body['monitoring']['config'].pop('action_scope')
         self.assertEqual(store.mutate('POST', '/api/import', body)[0], 200)
         self.assertEqual(store.backup()['monitoring']['config']['action_scope'], 'Legacy API scope')

@@ -31,7 +31,7 @@
   };
   const icon = (name, cls = '') => `<svg ${cls ? `class="${cls}"` : ''} viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.info}</svg>`;
   const platforms = ['YouTube','Facebook','Instagram','X','Reddit','TikTok','LinkedIn','Discord','Substack','Threads','Gmail','Outlook'];
-  const WELCOME_PITCH = 'Resonance is a private notebook of what you have said online. Your own AI assistant does the reading and writes what it finds here — this page never touches your accounts.';
+  const WELCOME_PITCH = 'Resonance is a private notebook of what you have said online. Paste your writing, try samples, or set up the separate browser reader. Your own assistant can also bring in posts for review.';
   const platformMarks = {YouTube:icon('youtube'), Facebook:'f', Instagram:'◎', X:'𝕏', Reddit:'r', TikTok:'♪', LinkedIn:'in', Discord:'D', Substack:'S', Threads:'T', Gmail:'M', Outlook:'O'};
   const platformIcon = account => `<span class="platform-icon" aria-hidden="true">${platformMarks[account?.platform] || '·'}</span>`;
   const nameOf = account => account ? (account.display_name || account.handle || account.platform) : 'Unknown account';
@@ -79,6 +79,8 @@
   const actionRequests = () => Array.isArray(state.data?.action_requests) ? state.data.action_requests : [];
   const sourceItems = () => Array.isArray(state.data?.source_items) ? state.data.source_items : [];
   const attestations = () => Array.isArray(state.data?.attestations) ? state.data.attestations : [];
+  const requestInbox = () => Array.isArray(state.data?.request_inbox) ? state.data.request_inbox : [];
+  const inboxStateLabel = {needs_review:'Needs review',prepared:'Prepared',done:'Done',dismissed:'Dismissed'};
   const sourceItemById = id => sourceItems().find(item => item.id === id);
   const sourceFilterFor = item => item?.status === 'needs_you' ? 'needs_you' : item?.status === 'waiting' ? 'waiting' : item?.status === 'verification_pending' ? 'verification_pending' : item?.status === 'snoozed' ? 'snoozed' : ['kept','verified','checked','resolved'].includes(item?.status) ? 'history' : 'all';
   const requestForReview = reviewId => actionRequests().filter(request => request.review_id === reviewId).sort((a,b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
@@ -142,13 +144,36 @@
     } catch { throw new Error('The local workspace is unavailable. Start Resonance on this computer, then try again.'); }
     let result;
     try { result = await response.json(); } catch { throw new Error('The workspace returned an unreadable response. Please try again.'); }
-    if (!response.ok) throw new Error(result.error || 'That change could not be saved. Please try again.');
+    if (!response.ok) throw Object.assign(new Error(result.error || 'That change could not be saved. Please try again.'),{status:response.status});
     return result;
   }
   const showingSamples = () => state.data?.workspace?.mode === 'samples';
   const downloadAttributes = path => showingSamples() ? 'aria-disabled="true" title="Clear samples to export your own data"' : `href="${esc(downloadPath(path))}" download`;
   const downloadPath = path => `${path}?workspace=${encodeURIComponent(state.data?.workspace?.token || '')}`;
+  // Reader state machine and bridge protocol live in reader-client.js; this page only renders them.
+  const readerClient = globalThis.ResonanceReaderClient ? globalThis.ResonanceReaderClient.create({
+    document,location,crypto:globalThis.crypto,CustomEvent:globalThis.CustomEvent,
+    setTimeout:(fn,ms) => setTimeout(fn,ms),clearTimeout:handle => clearTimeout(handle),now:() => Date.now(),
+    storage:globalThis.sessionStorage,request:(path,method,body) => api(path,method,body),
+    getAccounts:() => state.data?.accounts,getWorkspaceToken:() => state.data?.workspace?.token,isSamples:() => showingSamples(),
+    onSaved:() => reload(),
+  }) : null;
+  // Callbacks for "the workspace changed" (switch to or from samples, another workspace).
+  const workspaceChangeHandlers = new Set();
+  // Own-account discovery controller (account-discovery.js): protocol, validation and the five-minute hold live
+  // there; this page asks the person and does the saving. It starts only from the trusted click on #res-find-accounts.
+  const discovery = globalThis.ResonanceAccountDiscovery ? globalThis.ResonanceAccountDiscovery.create({
+    emit:(type,detail) => document.dispatchEvent(new CustomEvent(type,{detail})),
+    on:(type,handler) => {
+      const listener = event => {if (event.target === document) handler(event.detail);};
+      document.addEventListener(type,listener);
+      return () => document.removeEventListener?.(type,listener);
+    },
+    change:handler => {workspaceChangeHandlers.add(handler);return () => workspaceChangeHandlers.delete(handler);},
+    clock:() => Date.now(),
+  }) : null;
   function resetWorkspaceEditors() {
+    for (const handler of Array.from(workspaceChangeHandlers)) {try {handler();} catch {}}
     clearTimeout(toastTimer);$('#toast').hidden = true;
     clearTimeout(draftTimer);
     state.draftSequence++;
@@ -162,6 +187,7 @@
       }
     } catch {}
     state.fixDraft = null;state.retraction = null;accountWalk = null;importPayload = null;
+    readerClient?.reset();readerCorpus = null;readerCorpusSequence++;readerReceiptSequence++;
     closeDialogIfOpen();
   }
   function renderSampleBanner() {
@@ -224,6 +250,7 @@
       applyTheme();
       showConnection();
       if (renderView) render();
+      try {readerAfterState();} catch {}
       return true;
     } catch (error) {
       if (sequence !== stateReadSequence) return false;
@@ -295,11 +322,56 @@
     return `<div class="today-report-meta"><time datetime="${esc(reportDate)}" aria-label="Report date ${esc(dateText(reportDate,true))}">${esc(dateText(reportDate,true))}</time><span>${esc(completion)}</span></div><p class="today-report-summary">${esc(trimText(run.summary || 'No summary was recorded for this report.',420))}</p>${coverageCounts(run,'today-report-counts')}<div class="today-report-footer"><span>${esc(nextScheduledCheckText())}</span><button class="text-button" data-action="latest-check">Full report ${icon('arrow')}</button></div>`;
   }
   function todayReport() {
-    return `<section class="today-report terminal-panel"><div class="section-heading"><div><div class="eyebrow">LATEST SAVED REPORT</div><h2>Latest saved check</h2></div></div><div id="today-report-content">${todayReportContent()}</div></section>`;
+    return `<section class="today-report terminal-panel"><div class="section-heading"><div><div class="eyebrow">LATEST SAVED REPORT</div><h2>Latest assistant report</h2></div></div><div id="today-report-content">${todayReportContent()}</div></section>`;
   }
   function todayNeedsYou() {
     const items = todaySourceBuckets().needs_you, previews = items.slice(0,3);
     return `<div class="section-heading"><div><h2>Needs you <button class="section-count count-button" data-action="review-filter" data-status="needs_you" aria-label="Open needs-you posts">${items.length}</button></h2><p>Saved sources that need a decision.</p></div><button class="text-button" data-action="review-filter" data-status="needs_you">All needs-you posts ${icon('arrow')}</button></div>${previews.length ? `<div class="review-stack">${previews.map(item => sourceCard(item,true)).join('')}</div>${items.length > previews.length ? `<p class="preview-limit">Showing ${previews.length} of ${items.length}. Posts has the complete list.</p>` : ''}` : `<div class="today-empty"><strong>No needs-you items recorded.</strong><p>This describes the saved source evidence. It is not an account audit. Check a post to add something you want to consider.</p><button class="text-button" data-action="add-excerpt">Check a post</button></div>`}`;
+  }
+  function inboxAge(value) {
+    const elapsed = Date.now() - new Date(value).getTime();
+    if (!value || Number.isNaN(elapsed)) return 'at an unrecorded time';
+    if (elapsed < 0) return `on ${shortDate(value)}`;
+    const minutes = Math.floor(elapsed / 60000);
+    if (minutes < 60) return minutes < 2 ? 'just now' : `${minutes} min ago`;
+    if (minutes < 1440) return `${Math.floor(minutes / 60)} h ago`;
+    const days = Math.floor(minutes / 1440);
+    return days < 14 ? `${days} ${days === 1 ? 'day' : 'days'} ago` : `on ${shortDate(value)}`;
+  }
+  function inboxControls(request) {
+    const button = (target,label,quiet = true) => `<button class="button ${quiet ? 'quiet ' : ''}small" data-action="inbox-update" data-id="${esc(request.id)}" data-state="${esc(target)}">${esc(label)}</button>`;
+    if (showingSamples()) return '';
+    if (request.state === 'needs_review') return button('prepared','Mark prepared') + button('dismissed','Dismiss');
+    if (request.state === 'prepared') return button('done','Mark handled locally') + button('dismissed','Dismiss') + button('needs_review','Back to review');
+    if (request.state === 'dismissed') return button('needs_review','Reopen');
+    return '';
+  }
+  function inboxCard(request) {
+    const account = accountById(request.account_id);
+    const proof = request.evidence || {};
+    const earlier = Array.isArray(request.history) ? request.history.length : 0;
+    return `<article class="inbox-card" data-request-id="${esc(request.id)}"><div class="review-metadata"><span class="badge ${request.state === 'needs_review' ? 'attention' : request.state === 'done' ? 'strength' : 'suggestion'}">${esc(inboxStateLabel[request.state] || request.state)}</span><span>${esc(account?.platform || 'Account')} · ${esc(handleOf(account) || 'Account not saved')}</span><span>${esc(kindLabel[request.kind] || 'Comment')}</span><time datetime="${esc(request.observed_at)}" title="${esc(dateText(request.observed_at,true))}">Read ${esc(inboxAge(request.observed_at))}</time></div><blockquote class="review-excerpt">${esc(request.text)}</blockquote>${request.revision > 1 && request.state === 'needs_review' ? `<p class="inbox-note">The comment changed after an earlier request (${esc(String(earlier))} earlier ${earlier === 1 ? 'version' : 'versions'} kept). Its old evaluation no longer applies.</p>` : ''}${request.evaluation ? `<div class="inbox-detail"><span class="detail-label">Evaluation</span><p>${esc(trimText(request.evaluation,300))}</p></div>` : ''}${request.proposal ? `<div class="inbox-detail"><span class="detail-label">Proposed ${esc(request.proposal_kind === 'edit' ? 'edit' : 'reply')} · not sent</span><p>${esc(trimText(request.proposal,300))}</p></div>` : ''}${request.state === 'done' ? `<p class="inbox-note">${esc(request.handled_note)}</p>` : ''}<p class="inbox-note">${esc(request.outcome)}</p><p class="inbox-note">Own-account check: reported by your assistant ${esc(dateText(proof.checked_at,true))}. The platform did not confirm it.</p><div class="review-card-footer"><span class="inbox-links">${sourceLink(request.source_url,'Open comment')}${request.parent_url ? sourceLink(request.parent_url,'Open parent post') : ''}</span><div class="quick-actions">${inboxControls(request)}</div></div></article>`;
+  }
+  function todayRequests() {
+    const items = requestInbox(), waiting = items.filter(request => ['needs_review','prepared'].includes(request.state)), previews = waiting.slice(0,4);
+    const intro = 'Public comments addressed to RES that your assistant has read and imported. Resonance cannot watch for them or react instantly: ask your assistant to check and import. Nothing here runs or publishes.';
+    return `<div class="section-heading"><div><h2>RES requests <span class="section-count">${waiting.length}</span></h2><p>${esc(intro)}</p></div></div>${previews.length ? `<div class="review-stack">${previews.map(inboxCard).join('')}</div>${waiting.length > previews.length ? `<p class="preview-limit">Showing ${previews.length} of ${waiting.length} open requests. Your assistant can list the rest.</p>` : ''}` : `<div class="today-empty"><strong>No open RES requests saved.</strong><p>${items.length ? `${items.length} handled or dismissed ${items.length === 1 ? 'request is' : 'requests are'} kept on this computer.` : 'Ask your assistant to look for comments you left addressed to RES, and to import any it finds.'}</p></div>`}`;
+  }
+  async function updateInboxRequest(button) {
+    const request = requestInbox().find(item => item.id === button.dataset.id);
+    if (!request || showingSamples()) return;
+    const target = button.dataset.state;
+    const body = {state:target,revision:request.revision};
+    // A local mark only records what you did here; it never claims a platform change.
+    if (target === 'prepared') body.evaluation = (request.evaluation || '').trim() ? request.evaluation : 'Reviewed by you in Resonance. No assistant evaluation text was saved.';
+    if (target === 'done') body.handled_note = 'Marked handled locally in Resonance. Resonance did not publish anything.';
+    button.disabled = true;
+    try {
+      await api(`/api/request-inbox/${encodeURIComponent(request.id)}`,'PATCH',body);
+      await reload();
+      toast(target === 'dismissed' ? 'Request dismissed locally.' : target === 'done' ? 'Marked handled locally. Nothing was published.' : target === 'prepared' ? 'Marked prepared locally. Nothing was sent.' : 'Request back in review.');
+    } catch (error) {toast(error.message);}
+    finally {if (button.isConnected) button.disabled = false;}
   }
   function todayWaiting() {
     const {waiting,verification_pending:verification} = todaySourceBuckets();
@@ -318,12 +390,12 @@
     return `<div class="today-access-list">${items.slice(0,4).map(account => { const access = accessState(account), unset = !account.identity_mode || account.identity_mode === 'unclassified'; return `<button class="today-access-row" data-action="setup-account" data-id="${esc(account.id)}"><span>${platformIcon(account)}<span><strong>${esc(account.platform)} · ${esc(handleOf(account) || 'Identity not recorded')}</strong>${account.display_name && account.display_name !== account.handle ? `<small>${esc(account.display_name)}</small>` : ''}</span></span><span><em>${esc(access.label)}${access.record?.checked_at ? ` · ${esc(relativeDate(access.record.checked_at))}` : ''}</em>${unset ? '<small>Boundaries not set</small>' : ''}</span></button>`; }).join('')}</div>${items.length > 4 ? `<p class="preview-limit">Showing 4 of ${items.length} setup items.</p>` : ''}`;
   }
   function renderOverview() {
-    if (!state.data.accounts.length && !state.data.reviews.length && !sourceItems().length && !monitorRuns().length && !communicationList('messages').length) return renderWelcome();
+    if (!state.data.accounts.length && !state.data.reviews.length && !sourceItems().length && !monitorRuns().length && !communicationList('messages').length && !requestInbox().length) return renderWelcome();
     const top = heading('Today.','Saved evidence. Clear next steps.', `<button class="button quiet" data-action="navigate" data-view="accounts">${icon('accounts')}Accounts</button><button class="button primary" data-action="add-excerpt">${icon('review')}Check a post</button><a class="button quiet" ${downloadAttributes('/api/brief')}>${icon('download')}<span class="desktop-label">Export brief</span><span class="sr-only">Download brief</span></a>`, new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}));
-    return top + todayReport() + `<div id="today-summary-content">${todaySummary()}</div><div class="today-grid"><div class="today-main"><section class="terminal-panel" id="today-needs-you"><div id="today-needs-you-content">${todayNeedsYou()}</div></section></div><aside class="today-side"><section class="terminal-panel" id="today-waiting"><div id="today-waiting-content">${todayWaiting()}</div></section><section class="terminal-panel" id="today-mail"><div class="section-heading"><div><h2>Saved mail <button class="section-count count-button" data-action="navigate" data-view="mail" aria-label="Open saved mail" id="today-mail-count">${communicationList('messages').length}</button></h2><p>Local previews and reply drafts.</p></div><button class="text-button" data-action="navigate" data-view="mail">Open Mail ${icon('arrow')}</button></div><div id="today-mail-content">${todayMail()}</div></section><section class="terminal-panel" id="today-accounts"><div class="section-heading"><div><h2>Account attention</h2><p>Saved access or boundary setup that needs a look.</p></div><button class="text-button" data-action="navigate" data-view="accounts">Open Accounts ${icon('arrow')}</button></div><div id="today-accounts-content">${todayAccountAttention()}</div></section></aside></div>`;
+    return top + readerTodaySection() + todayReport() + `<div id="today-summary-content">${todaySummary()}</div><div class="today-grid"><div class="today-main"><section class="terminal-panel" id="today-needs-you"><div id="today-needs-you-content">${todayNeedsYou()}</div></section><section class="terminal-panel" id="today-requests"><div id="today-requests-content">${todayRequests()}</div></section></div><aside class="today-side"><section class="terminal-panel" id="today-waiting"><div id="today-waiting-content">${todayWaiting()}</div></section><section class="terminal-panel" id="today-mail"><div class="section-heading"><div><h2>Saved mail <button class="section-count count-button" data-action="navigate" data-view="mail" aria-label="Open saved mail" id="today-mail-count">${communicationList('messages').length}</button></h2><p>Local previews and reply drafts.</p></div><button class="text-button" data-action="navigate" data-view="mail">Open Mail ${icon('arrow')}</button></div><div id="today-mail-content">${todayMail()}</div></section><section class="terminal-panel" id="today-accounts"><div class="section-heading"><div><h2>Account attention</h2><p>Saved access or boundary setup that needs a look.</p></div><button class="text-button" data-action="navigate" data-view="accounts">Open Accounts ${icon('arrow')}</button></div><div id="today-accounts-content">${todayAccountAttention()}</div></section></aside></div>`;
   }
   function renderWelcome() {
-    return `<section class="welcome-panel panel"><div class="welcome-intro"><div class="eyebrow">WELCOME</div><h1>Resonance</h1><p class="welcome-pitch">${esc(WELCOME_PITCH)}</p></div><div class="welcome-doors"><button class="welcome-door" data-action="start-samples"><span class="step-number">01</span><span><strong>See it with sample posts</strong><small>Ten seconds, nothing to set up.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="welcome-paste"><span class="step-number">02</span><span><strong>Check something I wrote</strong><small>Paste your own post, comment or reply.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="add-account"><span class="step-number">03</span><span><strong>Bring in my accounts</strong><small>One account at a time.</small></span>${icon('arrow')}</button></div><button class="welcome-privacy text-button" data-action="your-data">Everything stays in a folder on this computer. No account, no cloud, no tracking. ${icon('arrow')}</button></section>`;
+    return `<section class="welcome-panel panel"><div class="welcome-intro"><div class="eyebrow">WELCOME</div><h1>Resonance</h1><p class="welcome-pitch">${esc(WELCOME_PITCH)}</p></div><div class="welcome-doors"><button class="welcome-door" data-action="reader-setup"><span class="step-number">01</span><span><strong>Set up account checks</strong><small>Read your newest X and YouTube text in this browser. Preview.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="welcome-paste"><span class="step-number">02</span><span><strong>Paste my first post</strong><small>Save an account, then check something you wrote.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="start-samples"><span class="step-number">03</span><span><strong>Try samples</strong><small>Ten seconds, nothing to set up.</small></span>${icon('arrow')}</button></div><button class="welcome-privacy text-button" data-action="your-data">Everything stays in a folder on this computer. No account, no cloud, no tracking. ${icon('arrow')}</button></section>`;
   }
   function requestOverview() {
     const requests = actionRequests();
@@ -468,7 +540,7 @@
     return JSON.stringify({accounts:data?.accounts || [],communication:data?.communication || null,access_freshness:accessFreshness});
   }
   function sourceStateSignature(data = state.data) {
-    return JSON.stringify({source_items:data?.source_items || [],action_requests:data?.action_requests || [],attestations:data?.attestations || []});
+    return JSON.stringify({source_items:data?.source_items || [],action_requests:data?.action_requests || [],attestations:data?.attestations || [],request_inbox:data?.request_inbox || []});
   }
   function updateSourceView() {
     if (!['overview','review','accounts'].includes(state.view)) {state.sourceSignature = sourceStateSignature();state.sourceRefreshPending = false;return;}
@@ -478,6 +550,7 @@
         [$('#today-summary-content'),() => todaySummary()],
         [$('#today-needs-you-content'),() => todayNeedsYou()],
         [$('#today-waiting-content'),() => todayWaiting()],
+        [$('#today-requests-content'),() => todayRequests()],
       ].filter(([target]) => target);
       if (replacements.some(([target]) => target.contains(document.activeElement))) {state.sourceRefreshPending = true;return;}
       replacements.forEach(([target,html]) => {target.innerHTML = html();});
@@ -950,10 +1023,439 @@
     } catch(error) { if (sequence === state.draftSequence) state.draftError = error.message; }
     finally { if (sequence === state.draftSequence) {state.draftBusy = false;updateDraftResult();} }
   }
+  // ---- Browser reader checks: setup, one-click check, receipts and the exact text read ----------
+  let readerDialogKind = '';
+  let readerDialogAccount = '';
+  let readerCorpus = null;
+  let readerCorpusSequence = 0;
+  let readerReceiptSequence = 0;
+  let readerRecovered = false;
+  const readerNum = value => Number.isInteger(value) && value >= 0 ? value : 0;
+  const readerPlural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+  const readerProvider = account => ['X','YouTube'].includes(account?.platform);
+  const readerName = account => `${account?.platform || 'Account'} · ${handleOf(account) || 'handle not recorded'}`;
+  const readerCanCheck = () => !!readerClient && !showingSamples();
+  // A check and a discovery never overlap: the bridge refuses both, and the page keeps its buttons honest.
+  const discoveryActive = () => !!discovery && ['starting','running'].includes(discovery.state().status);
+  const readerBusy = () => !!readerClient && (readerClient.busy() || discoveryActive());
+  const readerStages = {permission:'checking permission',identity:'confirming the account',listing:'finding recent items',source:'reading an item',recheck:'re-checking its text',final_identity:'confirming the account again'};
+  const readerReasons = {
+    permission_needed:'Permission is needed for this site. Open reader settings to allow it.',
+    ownership_not_confirmed:'The reader could not confirm that the signed-in account is yours.',
+    identity_invalid:'The saved handle or profile link does not identify this account clearly.',
+    identity_unconfirmed:'This YouTube account is saved by channel ID only. Edit it and save its current handle so it can be confirmed.',
+    identity_duplicate:'Another selected account has the same identity.',
+    identity_conflict:'The saved handle and profile link name different accounts.',
+    provider_not_supported:'Automatic checking is not available yet for this platform.',
+    batch_timeout:'The check ran out of time before this account.',
+    reader_unresponsive:'The reader stopped answering.',
+    result_invalid:'The reader returned something Resonance could not verify.',
+    more_available:'More recent items exist that this check did not read.',
+    fewer_than_limit:'Fewer than the three newest items were found.',
+    not_signed_in:'The browser was not signed in to this site.',
+    sign_in_needed:'The browser was not signed in to this site.',
+  };
+  const readerReasonText = reason => readerReasons[reason] || `The reader reported “${String(reason || 'unknown').replace(/_/g,' ')}”.`;
+
+  function readerSetupState() {
+    if (!readerClient) return {key:'unavailable',label:'Reader helper not loaded',detail:'This page could not load its reader helper. Reload Resonance. Pasting text and your own assistant still work.'};
+    if (showingSamples()) return {key:'samples',label:'Not used with sample data',detail:'Sample data is never read from a real account. Clear the samples to check your own accounts.'};
+    const setup = readerClient.setup;
+    if (setup.status === 'checking') return {key:'checking',label:'Looking for the browser reader…',detail:'This only looks for the reader in this browser. It reads nothing.'};
+    if (setup.status === 'absent') return {key:'absent',label:'Browser reader not found',detail:'It was not found in this browser. It may not be installed here, or it may be turned off.'};
+    if (setup.status === 'blocked') return {key:'blocked',label:'Blocked on this address',detail:'Browser checks only work when Resonance is open at http://127.0.0.1:4317/ in the browser that has the reader.'};
+    if (setup.status === 'offline') return {key:'offline',label:'Reader disconnected',detail:'The reader connection was lost. Look again, or reload this page.'};
+    if (setup.status === 'connected') return {key:'checking',label:'Reader found, confirming its version…',detail:'This only confirms the version. It reads nothing.'};
+    if (setup.status === 'mismatch') return {key:'version',label:'Reader version does not match',detail:`This page works with reader version ${readerClient.expected.version}. ${setup.version ? `Found ${setup.version}.` : 'The reader did not report its version.'} Update or reinstall the preview reader, then look again.`};
+    const sites = [['x','X'],['youtube','YouTube']];
+    const denied = sites.filter(([key]) => setup[key] === false).map(([,name]) => name);
+    const detail = sites.map(([key,name]) => `${name}: ${setup[key] === true ? 'allowed' : setup[key] === false ? 'permission needed' : 'not confirmed'}`).join(' · ');
+    if (denied.length) return {key:'permission',label:'Permission needed',detail:`${detail}. Open reader settings to allow each site you want checked.`};
+    return {key:'ready',label:'Ready',detail};
+  }
+  const readerStateLine = () => { const info = readerSetupState(); return `<p class="reader-state"><span class="check-status">${esc(info.label)}</span> ${esc(info.detail)}</p>`; };
+
+  function readerEntryText(entry) {
+    if (entry.kind === 'unsupported') return 'Not supported yet';
+    if (entry.kind === 'held') return `Not read · ${readerReasonText(entry.reason)}`;
+    if (entry.state === 'queued') return 'Waiting';
+    if (entry.state === 'reading') return `Reading · ${readerStages[entry.stage] || 'working'}`;
+    if (entry.state === 'read') return entry.outcome === 'ok' ? 'Read · not saved yet' : `Could not read · ${readerReasonText(entry.reason)}`;
+    return 'Discarded';
+  }
+  function readerTotalsText(totals) {
+    const t = totals || {};
+    return `${readerPlural(readerNum(t.accounts),'account','accounts')}: ${readerNum(t.ok)} read, ${readerNum(t.held) + readerNum(t.error)} could not be read, ${readerNum(t.unsupported)} not supported yet · ${readerPlural(readerNum(t.sources),'item','items')} saved · ${readerPlural(readerNum(t.findings),'rule match','rule matches')}.`;
+  }
+  function readerCheckProgress(withIds) {
+    const check = readerClient?.check;
+    if (!check) return '';
+    const titles = {arming:'Starting',beginning:'Starting',reading:'Reading in your browser',saving:'Saving',unknown:'Save status unknown',saved:'Saved',cancelled:'Cancelled',failed:'Stopped',discarded:'Discarded'};
+    const active = ['arming','beginning','reading','saving'].includes(check.phase);
+    const rows = (check.entries || []).map(entry => `<li><span>${esc(`${entry.snapshot.platform} · ${entry.snapshot.handle || 'handle not recorded'}`)}</span><em>${esc(readerEntryText(entry))}</em></li>`).join('');
+    const totals = check.phase === 'saved' && check.receipt?.totals ? `<p>${esc(readerTotalsText(check.receipt.totals))}</p>` : '';
+    const buttons = [];
+    if (withIds && active) buttons.push(`<button id="res-check-cancel" class="button quiet" data-action="reader-cancel" ${check.phase === 'saving' ? 'disabled' : ''}>Cancel check</button>`);
+    if (check.phase === 'unknown' && check.canRetry) buttons.push('<button class="button primary" data-action="reader-retry">Retry save</button>');
+    if (check.phase === 'unknown' && !check.canRetry && !check.looking) buttons.push('<button class="button quiet" data-action="reader-lookup">Check save status</button>');
+    if (check.phase === 'saved') buttons.push(`<button class="button primary" data-action="reader-receipt" data-id="${esc(check.checkId)}">View receipt</button>`);
+    if (!active && check.phase !== 'unknown') buttons.push('<button class="button quiet" data-action="reader-dismiss">Dismiss</button>');
+    return `<div class="reader-progress" data-phase="${esc(check.phase)}"><h3>${esc(titles[check.phase] || 'Check')}</h3><p class="sr-only" role="status">${esc(check.message)}</p><p>${esc(check.message)}</p>${check.note ? `<p class="field-help">${esc(check.note)}</p>` : ''}${rows ? `<ul class="reader-entries">${rows}</ul>` : ''}${totals}${buttons.length ? `<div class="reader-controls">${buttons.join('')}</div>` : ''}</div>`;
+  }
+  function readerLatestHtml() {
+    const summary = state.data?.reader_check_summary;
+    const latest = Array.isArray(summary?.recent) ? summary.recent[0] : null;
+    if (!latest) return '<p class="field-help reader-latest">No browser check has been saved yet.</p>';
+    return `<div class="reader-latest"><div class="detail-label">${latest.origin === 'imported' ? 'LATEST IMPORTED CHECK' : 'LATEST SAVED CHECK'}</div><p><strong>${esc(dateText(latest.completed_at,true))}</strong> · ${esc(readerTotalsText(latest.totals))}</p><div class="reader-controls"><button class="button quiet small" data-action="reader-receipt" data-id="${esc(latest.id)}">View receipt</button><button class="text-button" data-action="reader-receipts">All saved checks (${readerNum(summary.count)})</button></div></div>`;
+  }
+  function readerTodayContent() {
+    const readable = state.data.accounts.filter(readerProvider).length;
+    const disabled = !readerCanCheck() || readerBusy();
+    const intro = readable ? 'Reads the newest posts and replies you wrote on X, and your newest comments on YouTube, in this browser. Nothing is saved until the whole check finishes.' : 'None of your saved accounts is on X or YouTube yet, so there is nothing to read automatically. Pasting text and your own assistant still work.';
+    return `<div class="section-heading"><div><h2>Check now</h2><p>${esc(intro)}</p></div></div><div class="reader-controls"><button id="res-check-now" class="button primary" data-action="reader-check-all" ${disabled ? 'disabled' : ''}>${icon('search')}Check now</button><button class="button quiet" data-action="reader-setup">Set up account checks</button><button class="button quiet" data-action="add-excerpt">Paste text</button><button class="button quiet" data-action="connect-assistant">Ask my assistant</button></div>${readerStateLine()}${readerCheckProgress(readerDialogKind !== 'check')}${readerLatestHtml()}`;
+  }
+  const readerTodaySection = () => `<section class="terminal-panel reader-today" id="reader-today" aria-label="Check now"><div id="reader-today-content">${readerTodayContent()}</div></section>`;
+
+  function readerAccountBody(id) {
+    const account = accountById(id);
+    if (!account) return '<p>This account is no longer saved.</p>';
+    const disabled = !readerCanCheck() || readerBusy();
+    return `<p>Resonance asks the browser reader to read up to three of the newest things you wrote on this account, then checks that text against its boundaries. It reads text only: not images, video or the conversation around an item. It never posts, edits or deletes anything.</p>${readerStateLine()}<div class="reader-controls"><button id="res-check-account" class="button primary" data-action="reader-check-account" data-id="${esc(id)}" ${disabled ? 'disabled' : ''}>${icon('search')}Check this account now</button><button class="text-button" data-action="reader-corpus" data-id="${esc(id)}">See what was read</button></div>${readerCheckProgress(true)}`;
+  }
+  function readerAccountDialog(id) {
+    const account = accountById(id);
+    if (!account) return;
+    if (readerClient && !showingSamples() && readerClient.setup.status !== 'installed') readerClient.probe();
+    openDialog(dialogShell('Check this account now',readerName(account),`<div id="reader-dialog-live">${readerAccountBody(id)}</div>`,'<button class="button quiet" data-action="close-dialog">Close</button>'));
+    readerDialogKind = 'check';
+    readerDialogAccount = id;
+  }
+  function readerSetupLive() {
+    const info = readerSetupState();
+    const options = readerClient && ['ready','permission','version','offline'].includes(info.key) ? '<button id="res-reader-options" class="button primary" data-action="reader-options">Open reader settings</button>' : '';
+    const again = readerClient && !showingSamples() ? '<button class="button quiet" data-action="reader-probe">Look again</button>' : '';
+    const hasAccounts = state.data.accounts.length > 0;
+    const alternatives = info.key === 'ready' ? '' : `<p class="field-help">Until the reader is ready you can still ${hasAccounts ? 'paste text you wrote' : 'paste your first post'}, ask your own assistant, or add an account by hand.</p><div class="reader-controls"><button class="button quiet" data-action="${hasAccounts ? 'add-excerpt' : 'welcome-paste'}">${hasAccounts ? 'Paste text' : 'Paste my first post'}</button><button class="button quiet" data-action="connect-assistant">Ask my assistant</button><button class="button quiet" data-action="add-account">Add an account by hand</button></div>`;
+    return `${readerStateLine()}<div class="reader-controls">${options}${again}</div>${alternatives}`;
+  }
+  function readerSetupDialog(message = '') {
+    if (readerClient && !showingSamples() && readerClient.setup.status !== 'installed') readerClient.probe();
+    const facts = ['The browser reader is a preview and is not in a browser store yet, so there is no install link here and Resonance cannot install it for you. Checks work only where it is already present.',
+      'Resonance looks for the reader in this same browser. If you open Resonance in a different browser, it will not be found there.',
+      'Each site is a separate permission you choose in reader settings. Browsers grant that access for the whole site (all of x.com; YouTube and Google My Activity), even though the reader only uses routes for your own content. You can remove a permission at any time.',
+      'It reads only text you wrote: your posts and replies on X, and your comments on YouTube. Each check reads at most the 3 newest items per account.',
+      'It does not scan images, video, or the conversation around an item.',
+      'YouTube checks use a separate visible browser window while they run.',
+      'It never posts, edits, deletes or changes anything, and it never sees your passwords. A check saves its results only after every account has finished; cancelling discards everything read.'];
+    const body = `<ul class="reader-facts">${facts.map(item => `<li>${esc(item)}</li>`).join('')}</ul><div id="reader-setup-live">${readerSetupLive()}</div><div id="reader-discovery-live">${discoveryHtml()}</div>`;
+    openDialog(dialogShell('Set up account checks','Browser reader preview',body,'<button class="button quiet" data-action="close-dialog">Close</button>'));
+    readerDialogKind = 'setup';
+    if (message) dialogError(new Error(message));
+  }
+  // ---- Find my accounts: discovery, choices and the explicit "Use this account" -------------------
+  const DISCOVERY_ACCEPT_MS = 5000;
+  const discoveryNames = {x:'X',youtube:'YouTube'};
+  let discoverySelection = {x:false,youtube:false};
+  let discoveryMessage = '';
+  let discoveryExpiryTimer = null;
+  const discoveryReasons = {
+    gesture_required:'Use the Find my accounts button itself to start this.',
+    wrong_page:'Open Resonance at http://127.0.0.1:4317/ in the browser that has the reader.',
+    invalid_input:'The reader could not accept this request. Nothing was looked at.',
+    busy:'The reader is already busy with a check or another search.',
+    replayed_discovery:'That search was already used. Start a new one.',
+    transport_unavailable:'The browser reader is not available in this browser.',
+    extension_context_invalidated:'The browser reader was updated or removed. Reload this page.',
+    transport_disconnected:'The browser reader disconnected, so the search was dropped. Nothing was saved.',
+    no_response:'The reader did not answer. It may be an older version without account finding. Nothing was saved.',
+    incomplete_results:'The reader stopped before every site answered, so the search was dropped. Nothing was saved.',
+    emit_failed:'The search could not be sent to the reader. Nothing was saved.',
+    clock_unavailable:'The search could not start. Reload Resonance.',
+    id_unavailable:'The search could not start. Reload Resonance.',
+    current_handle_unavailable:'The site showed the account only by its channel ID, not a current handle. Add it by hand with its profile link instead.',
+    ownership_not_confirmed:'The reader could not confirm which account is signed in.',
+    not_signed_in:'The browser was not signed in to this site.',
+    sign_in_needed:'The browser was not signed in to this site.',
+    reader_unresponsive:'The reader stopped answering.',
+    result_invalid:'The reader returned something Resonance could not verify.',
+    permission_needed:'Permission is needed for this site. Open reader settings to allow it, then find your accounts again.',
+  };
+  const discoveryReasonText = reason => discoveryReasons[reason] || `The reader reported “${String(reason || 'unknown').replace(/_/g,' ')}”. Nothing was saved.`;
+  const discoveryProviders = () => ['x','youtube'].filter(provider => discoverySelection[provider]);
+  // Why Find my accounts cannot start right now ('' when it can).
+  function discoveryBlock() {
+    if (!discovery) return 'The account finder did not load. Reload Resonance, or add the account by hand.';
+    if (!readerClient) return 'The reader helper did not load. Reload Resonance, or add the account by hand.';
+    if (showingSamples()) return 'Not used with sample data. Clear the samples first.';
+    if (readerClient.setup.status !== 'installed') return 'The browser reader is not ready. Finding accounts needs it; see its state above.';
+    if (readerClient.busy()) return 'A check is running. Wait for it to finish or cancel it.';
+    if (discoveryActive()) return 'Finding your accounts is already running.';
+    const providers = discoveryProviders();
+    if (!providers.length) return 'Choose X, YouTube, or both.';
+    const denied = providers.filter(provider => readerClient.setup[provider] === false);
+    if (denied.length) return `Permission is needed for ${denied.map(provider => discoveryNames[provider]).join(' and ')}. Open reader settings to allow it.`;
+    return '';
+  }
+  // The saved account, if any, that already is this discovered identity. Never offered twice.
+  function discoveryExisting(result) {
+    const platform = discoveryNames[result.provider];
+    const found = result.identity;
+    const lowerHandle = found.handle.toLowerCase();
+    return state.data.accounts.find(account => {
+      if (account.platform !== platform) return false;
+      const bare = String(account.handle || '').trim().replace(/^@/,'').toLowerCase();
+      if (bare === lowerHandle || account.url === found.profile_url) return true;
+      if (found.channel_id && bare === found.channel_id.toLowerCase()) return true;
+      const derived = globalThis.ResonanceReaderClient?.deriveIdentity(account);
+      return !!derived && ((derived.handle || '').toLowerCase() === lowerHandle || (!!found.channel_id && derived.channelId === found.channel_id));
+    }) || null;
+  }
+  // Checked again at the moment of "Use this account" and again at Save: the result must still be
+  // the held, unexpired, unreplaced one the person was looking at.
+  function discoveryFresh(provider, discoveryId, observedAt) {
+    if (!discovery || showingSamples()) return {problem:'Not used with sample data.'};
+    const current = discovery.state();
+    if (current.status !== 'done' || !discoveryId || current.discoveryId !== discoveryId) return {problem:'These results were replaced by a newer search, so nothing was saved. Look at the new results, or find your accounts again.'};
+    const result = discovery.candidates().find(item => item.provider === provider && item.observed_at === observedAt);
+    if (!result) return {problem:'That result is more than five minutes old, so it was dropped and nothing was saved. Find your accounts again.'};
+    return {result};
+  }
+  function discoveryCard(result, usable) {
+    const name = discoveryNames[result.provider];
+    const head = `<h4>${esc(name)}</h4>`;
+    if (result.status !== 'ok') {
+      const settings = result.reason === 'permission_needed' ? '<button class="button quiet small" data-action="reader-options">Open reader settings</button>' : '';
+      return `<article class="reader-discovery-card" data-provider="${esc(result.provider)}">${head}<p>${esc(`${name} was not found: ${discoveryReasonText(result.reason)}`)}</p>${settings}<p class="field-help">You can still add this account by hand, or paste text or ask your assistant.</p></article>`;
+    }
+    const found = result.identity;
+    const existing = discoveryExisting(result);
+    const seen = `<p class="field-help">Seen in your signed-in browser ${esc(dateText(result.observed_at,true))}. Nothing is saved until you choose, and this result is held in this tab for five minutes only.</p>`;
+    const detail = `<p><strong>${esc(found.handle)}</strong></p><p>${esc(found.profile_url)}</p>${found.channel_id ? `<p class="field-help">${esc(`Stable channel ID ${found.channel_id}`)}</p>` : ''}`;
+    if (existing) {
+      return `<article class="reader-discovery-card" data-provider="${esc(result.provider)}" data-existing="${esc(existing.id)}">${head}${detail}<p><strong>Already saved</strong> as ${esc(handleOf(existing))}. Resonance does not change a saved account from here.</p><button class="button quiet small" data-action="account-detail" data-id="${esc(existing.id)}">Open this saved account</button></article>`;
+    }
+    const buttons = usable ? `<div class="reader-controls"><button class="button primary small" data-action="discovery-use" data-provider="${esc(result.provider)}" data-discovery-id="${esc(discovery.state().discoveryId)}" data-observed-at="${esc(result.observed_at)}">Use this account</button><button class="button quiet small" data-action="discovery-discard" data-provider="${esc(result.provider)}">Not this one</button></div>` : '';
+    return `<article class="reader-discovery-card" data-provider="${esc(result.provider)}">${head}${detail}${seen}${buttons}</article>`;
+  }
+  function discoveryHtml() {
+    const other = '<p class="field-help">Other sites are not found automatically. Add them by hand with a profile link, paste text you wrote, or ask your own assistant.</p><div class="reader-controls"><button class="button quiet small" data-action="add-account">Add an account by hand</button><button class="button quiet small" data-action="connect-assistant">Ask my assistant</button></div>';
+    const intro = '<h3>Find my accounts</h3><p class="field-help">Optional. The reader opens the sites you choose, in this browser, and looks only at which account is signed in. It reads no posts, saves nothing and never switches accounts. You then choose whether to use what it found.</p>';
+    const current = discovery ? discovery.state() : {status:'idle',reason:null,results:[],providers:[]};
+    const block = discoveryBlock();
+    const active = discoveryActive();
+    const boxes = ['x','youtube'].map(provider => {
+      const denied = !!readerClient && readerClient.setup[provider] === false;
+      return `<div class="field check-field"><label for="res-discovery-${provider}"><input id="res-discovery-${provider}" type="checkbox" data-action="discovery-toggle" data-provider="${provider}" ${discoverySelection[provider] ? 'checked' : ''} ${active || denied || !discovery || showingSamples() ? 'disabled' : ''}><span>${esc(discoveryNames[provider])}${denied ? ' · permission needed (open reader settings)' : ''}</span></label></div>`;
+    }).join('');
+    const buttons = `<button id="res-find-accounts" class="button primary" data-action="discovery-find" ${block ? 'disabled' : ''}>Find my accounts</button>${active ? '<button id="res-find-cancel" class="button quiet" data-action="discovery-cancel">Cancel</button>' : ''}`;
+    let status = '';
+    if (current.status === 'starting') status = '<p role="status">Asking the reader…</p>';
+    else if (current.status === 'running') status = `<p role="status">Looking in your browser: ${esc(current.providers.map(provider => discoveryNames[provider]).join(', then '))}. YouTube opens its own visible window.</p>`;
+    else if (current.status === 'cancelled') status = '<p role="status">The search was cancelled. Nothing was saved.</p>';
+    else if (current.status === 'aborted' || current.status === 'rejected') status = `<p role="alert">${esc(discoveryReasonText(current.reason))}</p>`;
+    const finished = current.status === 'done';
+    const cards = current.results.map(result => discoveryCard(result,finished)).join('');
+    const results = cards ? `<div class="reader-discovery-results">${finished ? '' : '<p class="field-help">Finishing the other site first…</p>'}${cards}</div>` : '';
+    const note = discoveryMessage ? `<p class="form-error" role="alert">${esc(discoveryMessage)}</p>` : (block && !active ? `<p class="field-help">${esc(block)}</p>` : '');
+    return `${intro}<div class="reader-discovery-choices">${boxes}</div><div class="reader-controls">${buttons}</div>${status}${note}${results}${other}`;
+  }
+  // The trusted click's own task: discovery.start must run before anything is awaited.
+  function discoveryStart() {
+    discoveryMessage = '';
+    const block = discoveryBlock();
+    if (block) {discoveryMessage = block;renderReaderPanels();return;}
+    // A finished search is replaced by a new one; its held results are forgotten first.
+    if (discovery.state().status === 'done') discovery.clear();
+    const result = discovery.start(discoveryProviders());
+    if (!result.ok) discoveryMessage = discoveryReasonText(result.reason);
+    else setTimeout(() => {if (discovery.expireStalled(DISCOVERY_ACCEPT_MS)) renderReaderPanels();},DISCOVERY_ACCEPT_MS + 50);
+    renderReaderPanels();
+  }
+  function discoveryToggle(provider, checked) {
+    if (!discoveryNames[provider] || discoveryActive()) return;
+    discoverySelection[provider] = !!checked;
+    discoveryMessage = '';
+    renderReaderPanels();
+  }
+  function discoveryCancel() {
+    discoveryMessage = '';
+    discovery?.cancel();
+    renderReaderPanels();
+  }
+  function discoveryDiscard(provider) {
+    discovery?.discard(provider);
+    renderReaderPanels();
+  }
+  // "Use this account": the only way a discovered identity becomes the start of a saved account, and it
+  // goes through the same named/alias, daring and SFW questions as any new account.
+  function discoveryUse(button) {
+    const {provider,discoveryId,observedAt} = button.dataset;
+    const fresh = discoveryFresh(provider,discoveryId,observedAt);
+    if (!fresh.result) {discoveryMessage = fresh.problem;renderReaderPanels();return;}
+    const found = fresh.result.identity;
+    const existing = discoveryExisting(fresh.result);
+    if (existing) {discoveryMessage = `${handleOf(existing)} is already saved, so it was not added again.`;renderReaderPanels();return;}
+    accountWalk = {route:'discovery',step:'boundaries',platform:discoveryNames[provider],handle:found.handle,url:found.profile_url,input:found.profile_url,
+      identity_mode:'named',daring:'careful',sfw_only:true,saved:null,
+      discovered:{provider,discoveryId,observedAt,workspace:state.data.workspace?.token || ''}};
+    discoveryMessage = '';
+    accountWalkDialog();
+  }
+  // Called before a discovered account is posted. Returns '' when it may be saved, else why not.
+  function discoverySaveProblem(walk) {
+    const mark = walk.discovered;
+    if (!mark) return '';
+    if (mark.workspace !== (state.data.workspace?.token || '')) return 'The workspace changed, so nothing was saved. Find your accounts again.';
+    const fresh = discoveryFresh(mark.provider,mark.discoveryId,mark.observedAt);
+    if (!fresh.result) return fresh.problem;
+    const found = fresh.result.identity;
+    if (found.handle !== walk.handle || found.profile_url !== walk.url) return 'The result no longer matches what was shown, so nothing was saved. Find your accounts again.';
+    if (discoveryExisting(fresh.result)) return 'That account is already saved, so it was not added again.';
+    return '';
+  }
+  function discoveryScheduleExpiry() {
+    clearTimeout(discoveryExpiryTimer);
+    discoveryExpiryTimer = null;
+    const at = discovery?.nextExpiry();
+    if (at === null || at === undefined) return;
+    discoveryExpiryTimer = setTimeout(renderReaderPanels,Math.max(0,at - Date.now()) + 50);
+  }
+  // Closing the setup dialog abandons a search still running and forgets what it found.
+  function discoveryDialogClosed() {
+    discoveryMessage = '';
+    discovery?.clear();
+  }
+  function renderReaderPanels() {
+    if (!state.data) return;
+    const focusId = document.activeElement?.id || '';
+    const today = $('#reader-today-content');
+    if (today) today.innerHTML = readerTodayContent();
+    if (readerDialogKind === 'check') { const live = $('#reader-dialog-live'); if (live) live.innerHTML = readerAccountBody(readerDialogAccount); }
+    if (readerDialogKind === 'setup') {
+      const live = $('#reader-setup-live'); if (live) live.innerHTML = readerSetupLive();
+      const finder = $('#reader-discovery-live'); if (finder) finder.innerHTML = discoveryHtml();
+    }
+    if (focusId) $(`#${focusId}`)?.focus({preventScroll:true});
+    discoveryScheduleExpiry();
+  }
+  discovery?.subscribe(renderReaderPanels);
+  function readerAllIds() {
+    const accounts = state.data.accounts;
+    return accounts.filter(readerProvider).concat(accounts.filter(account => !readerProvider(account))).map(account => account.id);
+  }
+  // Must stay synchronous up to the bridge's arm event: it only honours the click's own task.
+  function readerStart(ids) {
+    if (discoveryActive()) {toast('Finding your accounts is still running. Wait for it, or cancel it, before checking.');return;}
+    const result = readerClient ? readerClient.start(ids) : {ok:false,message:'The browser reader helper did not load. Reload Resonance.'};
+    if (!result.ok) {
+      if (result.setup && readerDialogKind !== 'setup') readerSetupDialog(result.message);
+      else if (dialog.open) dialogError(new Error(result.message));
+      else toast(result.message);
+    } else if (result.note) toast(result.note);
+    renderReaderPanels();
+  }
+  function readerAccountBlock(account) {
+    const id = esc(account.id);
+    if (!readerProvider(account)) return `<div class="dialog-subsection reader-account-block"><h3>Browser checks</h3><p class="detail-text"><strong>Saved · automatic checking not available yet</strong></p><p class="field-help">Resonance can only read X and YouTube so far. Saving this profile does not connect it. Paste text you wrote, or ask your own assistant.</p><div class="reader-controls"><button class="button quiet" data-action="add-excerpt" data-account="${id}">Paste text</button><button class="button quiet" data-action="connect-assistant">Ask my assistant</button></div></div>`;
+    return `<div class="dialog-subsection reader-account-block"><h3>Browser checks</h3><p class="detail-text">Saving this profile does not connect it. A check reads up to three of your newest items in this browser.</p><div class="reader-controls"><button class="button primary" data-action="reader-account-dialog" data-id="${id}" ${readerCanCheck() ? '' : 'disabled'}>${icon('search')}Check this account now</button>${showingSamples() ? '' : `<button class="text-button" data-action="reader-corpus" data-id="${id}">See what was read</button>`}</div></div>`;
+  }
+
+  // Saved receipt: what was read and what was not, with no safety score.
+  function readerReceiptAccount(item) {
+    const coverage = item.coverage && typeof item.coverage === 'object' ? item.coverage : null;
+    const skipped = Array.isArray(coverage?.skipped) ? coverage.skipped : [];
+    const gaps = (Array.isArray(item.gaps) ? item.gaps : []).map(gap => `<li>${esc(readerReasonText(gap))}</li>`).concat(skipped.map(row => `<li>${esc(readerPlural(readerNum(row.count),'item','items'))} skipped: ${esc(readerReasonText(row.reason))}</li>`)).join('');
+    const label = {ok:'Read',held:'Held · not read',error:'Could not read',unsupported:'Not supported yet'}[item.status] || 'Unknown';
+    const read = item.status === 'ok';
+    const matches = readerNum(item.finding_count);
+    const identity = item.identity && item.identity.handle ? `<p class="field-help">The reader saw the signed-in account as ${esc(item.identity.handle)}.</p>` : '';
+    const counts = read ? `<p>${esc(readerPlural(readerNum(item.source_count),'item','items'))} saved from ${readerNum(coverage?.accepted)} read (${readerNum(coverage?.examined)} looked at; at most ${readerNum(coverage?.limit)} are read). New ${readerNum(item.new_source_count)} · changed ${readerNum(item.changed_source_count)} · unchanged ${readerNum(item.unchanged_source_count)}.</p><p>${esc(readerPlural(matches,'rule match','rule matches'))} in ${esc(readerPlural(readerNum(item.flagged_source_count),'item','items'))}. This is not a safety rating.</p>` : `<p>${esc(readerReasonText(item.reason))}</p>`;
+    return `<article class="reader-receipt-account"><div class="section-heading"><div><h3>${esc(item.platform)} · ${esc(item.handle)}</h3></div><span class="check-status">${esc(label)}${read && coverage?.partial ? ' · partial' : ''}</span></div>${counts}${identity}${gaps ? `<div class="detail-label">GAPS</div><ul class="reader-gaps">${gaps}</ul>` : ''}<div class="reader-controls">${matches ? `<button class="button quiet small" data-action="reader-findings" data-id="${esc(item.account_id)}">Review these findings</button>` : ''}${read ? `<button class="text-button" data-action="reader-corpus" data-id="${esc(item.account_id)}">See what was read</button>` : ''}</div></article>`;
+  }
+  function readerReceiptHtml(receipt) {
+    const when = receipt.committed_at || receipt.completed_at;
+    return `<p><strong>${receipt.origin === 'historical' ? 'Imported history' : 'Saved'} ${esc(dateText(when,true))}</strong> · reader ${esc(receipt.reader_version)}</p><p>${esc(readerTotalsText(receipt.totals))}</p>${receipt.statement ? `<p class="field-help">${esc(receipt.statement)}</p>` : ''}<p class="field-help">${esc(receipt.scope_note || '')} Images and video are not inspected. A check with no rule matches does not mean an account is safe.</p><div class="reader-receipt-accounts">${receipt.accounts.map(readerReceiptAccount).join('')}</div>`;
+  }
+  async function readerReceiptDialog(id) {
+    const sequence = ++readerReceiptSequence;
+    openDialog(dialogShell('Saved check','Loading the saved receipt…','<p>Loading…</p>','<button class="button quiet" data-action="close-dialog">Close</button>'));
+    readerDialogKind = 'receipt';
+    const receipt = await api(`/api/checks/${encodeURIComponent(id)}`);
+    if (sequence !== readerReceiptSequence || !dialog.open) return;
+    if (!receipt || !Array.isArray(receipt.accounts)) throw new Error('This check has not been saved.');
+    openDialog(dialogShell('Saved check',dateText(receipt.completed_at,true),readerReceiptHtml(receipt),'<button class="button quiet" data-action="reader-receipts">All saved checks</button><button class="button primary" data-action="close-dialog">Done</button>'));
+    readerDialogKind = 'receipt';
+  }
+  function readerReceiptsDialog() {
+    const recent = Array.isArray(state.data?.reader_check_summary?.recent) ? state.data.reader_check_summary.recent : [];
+    const rows = recent.length ? recent.map(item => `<button class="check-account-row" data-action="reader-receipt" data-id="${esc(item.id)}"><span><strong>${esc(dateText(item.completed_at,true))}</strong><small>${esc(readerTotalsText(item.totals))}${item.origin === 'imported' ? ' Imported history.' : ''}</small></span></button>`).join('') : '<p>No browser check has been saved yet.</p>';
+    openDialog(dialogShell('Saved checks',`Showing the ${recent.length} most recent`,`<div class="reader-receipt-list">${rows}</div>`,'<button class="button quiet" data-action="close-dialog">Close</button>'));
+    readerDialogKind = 'receipts';
+  }
+
+  // Exact saved text, one bounded page at a time. Text is always escaped, never markup.
+  function readerSourceHtml(source, index) {
+    const revision = source.current_revision || {};
+    const kind = {post:'Post',reply:'Reply',comment:'Comment'}[source.kind] || 'Item';
+    const when = source.date_iso ? dateText(source.date_iso,true) : source.date_label ? `${source.date_label} (as shown by the platform)` : 'Date not shown by the platform';
+    const versions = readerNum(source.revision_count);
+    return `<article class="reader-source" id="reader-source-${index}" tabindex="-1"><div class="reader-source-head"><strong>${esc(kind)}</strong><span>${esc(when)}</span>${versions > 1 ? `<span>${versions} saved versions</span>` : ''}</div><pre class="reader-text">${esc(revision.text)}</pre>${revision.links_shortened ? '<p class="field-help">The platform shortened a link in this text. The saved wording matches what it displayed.</p>' : ''}<div class="reader-source-foot">${source.url ? sourceLink(source.url,'Open original') : '<span class="field-help">No original link recorded.</span>'}<span class="field-help">First seen ${esc(dateText(source.first_seen_at,true))} · last seen ${esc(dateText(source.last_seen_at,true))}</span></div></article>`;
+  }
+  function readerCorpusHtml() {
+    const view = readerCorpus;
+    if (!view) return '';
+    const list = view.sources.map(readerSourceHtml).join('');
+    const empty = !view.sources.length && !view.loading && !view.error ? '<p>Nothing has been read from this account yet. Saved text appears here after a check is saved.</p>' : '';
+    return `${list}${empty}${view.loading ? '<p>Loading…</p>' : ''}${view.error ? `<p class="form-error" role="alert">${esc(view.error)}</p>` : ''}${view.cursor && !view.loading ? '<div class="reader-controls"><button class="button quiet" data-action="reader-corpus-more">More</button></div>' : ''}`;
+  }
+  function readerPaintCorpus(focusIndex = -1) {
+    const target = $('#reader-corpus-live');
+    if (target) target.innerHTML = readerCorpusHtml();
+    if (focusIndex >= 0) $(`#reader-source-${focusIndex}`)?.focus({preventScroll:true});
+  }
+  async function readerCorpusDialog(accountId, more = false) {
+    const account = accountById(accountId);
+    if (!account) return;
+    if (!more || !readerCorpus || readerCorpus.accountId !== accountId) {
+      readerCorpus = {accountId,sources:[],cursor:null,loading:false,error:''};
+      openDialog(dialogShell('What was read',readerName(account),'<p class="field-help">Each item is the exact saved text, shown in full as plain text. Images and video were not inspected.</p><div id="reader-corpus-live"></div>','<button class="button quiet" data-action="close-dialog">Close</button>'));
+      readerDialogKind = 'corpus';
+    }
+    const view = readerCorpus;
+    if (view.loading) return;
+    const sequence = ++readerCorpusSequence;
+    const before = view.sources.length;
+    view.loading = true;
+    view.error = '';
+    readerPaintCorpus();
+    try {
+      const page = await api(`/api/corpus?account_id=${encodeURIComponent(accountId)}&limit=20${more && view.cursor ? `&cursor=${encodeURIComponent(view.cursor)}` : ''}`);
+      if (sequence !== readerCorpusSequence || readerCorpus !== view) return;
+      if (!page || !Array.isArray(page.sources)) throw new Error('The saved text could not be read. Please try again.');
+      view.sources = view.sources.concat(page.sources);
+      view.cursor = typeof page.next_cursor === 'string' && page.next_cursor ? page.next_cursor : null;
+    } catch (error) {
+      if (sequence !== readerCorpusSequence || readerCorpus !== view) return;
+      view.error = error.message || 'The saved text could not be read. Please try again.';
+    }
+    view.loading = false;
+    readerPaintCorpus(more && view.sources.length > before ? before : -1);
+  }
+  // Called after every successful state read.
+  function readerAfterState() {
+    if (!readerClient) return;
+    readerClient.revalidate();
+    if (!readerRecovered) {
+      readerRecovered = true;
+      readerClient.recover().then(() => { renderReaderPanels(); }, () => {});
+    }
+  }
+
   function dialogShell(title, subtitle, body, footer = '', form = '') {
     return `${form ? `<form id="${esc(form)}">` : ''}<div class="dialog-header"><div><h2 id="dialog-title">${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ''}</div><button class="icon-button" type="button" data-action="close-dialog" aria-label="Close dialog">${icon('close')}</button></div><div class="dialog-body"><div class="form-error" id="dialog-error" role="alert" hidden></div>${body}</div>${footer ? `<div class="dialog-footer">${footer}</div>` : ''}${form ? '</form>' : ''}`;
   }
   function openDialog(html) {
+    readerDialogKind = '';
     if (!dialog.open) dialogReturnFocus = document.activeElement;
     $('#dialog-content').innerHTML = html;
     if (!dialog.open) dialog.showModal();
@@ -1020,8 +1522,8 @@
     const route = routes[platform];
     return {handle,url:route ? `https://${route[0]}/${route[1]}${encodeURIComponent(handle)}` : ''};
   }
-  function startAccountWalk(platform = '') {
-    accountWalk = {step:platforms.includes(platform) ? 'identity' : 'platform',platform,handle:'',url:'',input:'',identity_mode:'named',daring:'careful',sfw_only:true,saved:null};
+  function startAccountWalk(platform = '',route = '') {
+    accountWalk = {route,step:platforms.includes(platform) ? 'identity' : 'platform',platform,handle:'',url:'',input:'',identity_mode:'named',daring:'careful',sfw_only:true,saved:null};
     accountWalkDialog();
   }
   function accountWalkDialog() {
@@ -1031,7 +1533,7 @@
     let body, footer, form = '';
     if (walk.step === 'platform') {
       body = `<p>Pick the platform for this account.</p><div class="platform-picker">${platforms.map(platform => `<button type="button" data-action="walk-platform" data-platform="${esc(platform)}">${platformIcon({platform})}<strong>${esc(platform)}</strong></button>`).join('')}</div>`;
-      footer = '<button type="button" class="button quiet" data-action="close-dialog">Cancel</button>';
+      footer = `<button type="button" class="button quiet" data-action="close-dialog">Cancel</button>${walk.route === 'first-post' ? '<button type="button" class="button quiet" data-action="draft-no-account">Check wording without an account</button>' : ''}`;
     } else if (walk.step === 'identity') {
       form = 'walk-identity-form';
       const isMail = ['Gmail','Outlook'].includes(walk.platform);
@@ -1039,11 +1541,13 @@
       footer = '<button type="button" class="button quiet" data-action="walk-back" data-step="platform">Back</button><button type="submit" class="button primary">Next</button>';
     } else if (walk.step === 'boundaries') {
       form = 'walk-boundaries-form';
-      body = `<div class="identity-reading"><strong>${esc(walk.platform)} · ${esc(walk.handle)}</strong><p>${walk.url ? esc(walk.url) : 'A handle only; no public profile link was inferred.'}</p><button type="button" class="text-button" data-action="walk-back" data-step="identity">Change this</button></div><div class="field"><label for="identity-mode">Is this under your real name or an alias?</label><select id="identity-mode" name="identity_mode"><option value="named" ${walk.identity_mode === 'named' ? 'selected' : ''}>My real name</option><option value="alias" ${walk.identity_mode === 'alias' ? 'selected' : ''}>An alias</option></select><p class="field-help">Accounts under your real name always stay safe for work; an alias is not a promise of anonymity.</p></div><div class="field"><label for="walk-daring">How daring may this account be?</label><select id="walk-daring" name="daring">${Object.entries(daringLabel).map(([value,label]) => `<option value="${value}" ${walk.daring === value ? 'selected' : ''}>${label}</option>`).join('')}</select><p class="field-help">Daring changes how much edge you want in your wording; it never overrides safe-for-work boundaries.</p></div><div class="field check-field"><label><input id="sfw-only" name="sfw_only" type="checkbox" ${walk.sfw_only ? 'checked' : ''} ${walk.identity_mode !== 'alias' ? 'disabled' : ''}>Keep this account safe for work</label><p class="field-help" id="identity-help">${walk.identity_mode === 'alias' ? 'An alias does not guarantee anonymity. Turning this off relaxes content checks for this account.' : 'Real-name accounts always require safe-for-work wording.'}</p></div>`;
-      footer = '<button type="button" class="button quiet" data-action="walk-back" data-step="identity">Back</button><button type="submit" class="button primary">Save account</button>';
+      body = `<div class="identity-reading"><strong>${esc(walk.platform)} · ${esc(walk.handle)}</strong><p>${walk.url ? esc(walk.url) : 'A handle only; no public profile link was inferred.'}</p>${walk.discovered ? '<p class="field-help">The browser reader saw this account signed in on this computer. It is saved exactly as shown, and only if you choose Save account. Real name, careful and safe for work are chosen for you; change them if they are not right.</p>' : '<button type="button" class="text-button" data-action="walk-back" data-step="identity">Change this</button>'}</div><div class="field"><label for="identity-mode">Is this under your real name or an alias?</label><select id="identity-mode" name="identity_mode"><option value="named" ${walk.identity_mode === 'named' ? 'selected' : ''}>My real name</option><option value="alias" ${walk.identity_mode === 'alias' ? 'selected' : ''}>An alias</option></select><p class="field-help">Accounts under your real name always stay safe for work; an alias is not a promise of anonymity.</p></div><div class="field"><label for="walk-daring">How daring may this account be?</label><select id="walk-daring" name="daring">${Object.entries(daringLabel).map(([value,label]) => `<option value="${value}" ${walk.daring === value ? 'selected' : ''}>${label}</option>`).join('')}</select><p class="field-help">Daring changes how much edge you want in your wording; it never overrides safe-for-work boundaries.</p></div><div class="field check-field"><label><input id="sfw-only" name="sfw_only" type="checkbox" ${walk.sfw_only ? 'checked' : ''} ${walk.identity_mode !== 'alias' ? 'disabled' : ''}>Keep this account safe for work</label><p class="field-help" id="identity-help">${walk.identity_mode === 'alias' ? 'An alias does not guarantee anonymity. Turning this off relaxes content checks for this account.' : 'Real-name accounts always require safe-for-work wording.'}</p></div>`;
+      footer = `${walk.discovered ? '<button type="button" class="button quiet" data-action="close-dialog">Cancel</button>' : '<button type="button" class="button quiet" data-action="walk-back" data-step="identity">Back</button>'}<button type="submit" class="button primary">Save account</button>`;
     } else {
       const signIn = safeUrl(signInUrls[walk.platform]);
-      body = `<p class="walk-saved">${icon('check')} ${esc(walk.handle)} is saved.</p><p>Resonance never sees your password; signing in in your browser lets your assistant read this account.</p><a class="button primary" href="${esc(signIn)}" target="_blank" rel="noopener noreferrer">Sign in to ${esc(walk.platform)} in your browser ${icon('external')}</a><p class="field-help">Saving this account does not verify a sign-in or read any posts.</p>`;
+      body = walk.discovered
+        ? `<p class="walk-saved">${icon('check')} ${esc(walk.handle)} is saved.</p><p>The reader confirmed this account during setup. Your first check verifies it again, reads at most three of your own recent items, and saves a receipt with any gaps.</p><p class="field-help">Nothing has been read yet. Images and video are not inspected. A YouTube check opens a separate visible window.</p><button id="res-check-account" type="button" class="button primary" data-action="reader-first-check" data-id="${esc(walk.saved)}">Run my first check</button>`
+        : `<p class="walk-saved">${icon('check')} ${esc(walk.handle)} is saved.</p><p>Resonance never sees your password; signing in in your browser lets your assistant read this account.</p><a class="button primary" href="${esc(signIn)}" target="_blank" rel="noopener noreferrer">Sign in to ${esc(walk.platform)} in your browser ${icon('external')}</a><p class="field-help">Saving this account does not verify a sign-in or read any posts.</p>${readerProvider({platform:walk.platform}) ? `<button type="button" class="button quiet" data-action="reader-account-dialog" data-id="${esc(walk.saved)}">Check this account now</button>` : ''}`;
       footer = '<button type="button" class="button quiet" data-action="add-account">Add another</button><button type="button" class="button primary" data-action="account-walk-done">Done</button>';
     }
     const step = {platform:1,identity:2,boundaries:3,signin:4}[walk.step];
@@ -1074,7 +1578,7 @@
     const unset = !account.identity_mode || account.identity_mode === 'unclassified';
     const reviewedDates = reviews.map(review => review.reviewed_at).filter(Boolean).sort();
     const access = accessState(account);
-    const body = `<div class="detail-account">${platformIcon(account)}<div><h3>${esc(nameOf(account))}</h3><p>${esc(handleOf(account))}</p>${sourceLink(account.url,'Open profile')}</div></div><div class="detail-stats"><div class="detail-stat"><strong>${reviews.length}</strong><span>observations</span></div><div class="detail-stat"><strong>${reviews.filter(review => review.status === 'open').length}</strong><span>open feedback</span></div><div class="detail-stat"><strong>${flags.filter(flag => flag.status === 'open').length}</strong><span>boundary flags</span></div></div><div class="detail-block"><div class="section-heading"><div class="detail-label">ACCOUNT BOUNDARIES</div><button class="text-button" data-action="account-edit" data-id="${esc(id)}">${unset ? 'Set boundaries' : 'Edit'} ${icon('arrow')}</button></div><p class="detail-text">${unset ? 'Identity is not set. Careful, SFW defaults apply until you choose how you want to show up.' : `${esc(identityLabel[account.identity_mode])} · ${esc(daringLabel[account.daring] || 'Careful')} · ${account.sfw_only !== false ? 'SFW only' : 'Custom boundaries'}. ${account.identity_mode === 'alias' ? 'An alias does not guarantee anonymity.' : 'Real-name accounts require SFW at every daring level.'}`}</p></div><div class="dialog-subsection"><h3>What’s in view</h3><p>${reviews.length ? `${reviews.length} saved review ${reviews.length === 1 ? 'observation' : 'observations'}. Latest review: ${esc(dateText(reviewedDates.at(-1)))}. This covers only the evidence saved here.` : 'No review evidence has been saved for this account. An added profile does not imply a reviewed account.'}</p><button class="button quiet small" data-action="account-reviews" data-id="${esc(id)}">View account posts ${icon('arrow')}</button></div><div class="dialog-subsection"><h3>Access evidence</h3><p><strong>${esc(access.label)}</strong>${access.record?.checked_at ? ` · ${esc(dateText(access.record.checked_at,true))}` : ''}. ${esc(access.detail)}</p><button class="text-button snapshot-edit" data-action="setup-account" data-id="${esc(id)}">View access evidence ${icon('arrow')}</button></div>`;
+    const body = `<div class="detail-account">${platformIcon(account)}<div><h3>${esc(nameOf(account))}</h3><p>${esc(handleOf(account))}</p>${sourceLink(account.url,'Open profile')}</div></div><div class="detail-stats"><div class="detail-stat"><strong>${reviews.length}</strong><span>observations</span></div><div class="detail-stat"><strong>${reviews.filter(review => review.status === 'open').length}</strong><span>open feedback</span></div><div class="detail-stat"><strong>${flags.filter(flag => flag.status === 'open').length}</strong><span>boundary flags</span></div></div><div class="detail-block"><div class="section-heading"><div class="detail-label">ACCOUNT BOUNDARIES</div><button class="text-button" data-action="account-edit" data-id="${esc(id)}">${unset ? 'Set boundaries' : 'Edit'} ${icon('arrow')}</button></div><p class="detail-text">${unset ? 'Identity is not set. Careful, SFW defaults apply until you choose how you want to show up.' : `${esc(identityLabel[account.identity_mode])} · ${esc(daringLabel[account.daring] || 'Careful')} · ${account.sfw_only !== false ? 'SFW only' : 'Custom boundaries'}. ${account.identity_mode === 'alias' ? 'An alias does not guarantee anonymity.' : 'Real-name accounts require SFW at every daring level.'}`}</p></div>${readerAccountBlock(account)}<div class="dialog-subsection"><h3>What’s in view</h3><p>${reviews.length ? `${reviews.length} saved review ${reviews.length === 1 ? 'observation' : 'observations'}. Latest review: ${esc(dateText(reviewedDates.at(-1)))}. This covers only the evidence saved here.` : 'No review evidence has been saved for this account. An added profile does not imply a reviewed account.'}</p><button class="button quiet small" data-action="account-reviews" data-id="${esc(id)}">View account posts ${icon('arrow')}</button></div><div class="dialog-subsection"><h3>Access evidence</h3><p><strong>${esc(access.label)}</strong>${access.record?.checked_at ? ` · ${esc(dateText(access.record.checked_at,true))}` : ''}. ${esc(access.detail)}</p><button class="text-button snapshot-edit" data-action="setup-account" data-id="${esc(id)}">View access evidence ${icon('arrow')}</button></div>`;
     openDialog(dialogShell(account.platform,'Account details',body,`<button class="button quiet" data-action="close-dialog">Done</button><button class="button primary" data-action="add-review" data-account="${esc(id)}">${icon('plus')}Add review</button>`));
   }
   function excerptForm(accountId = '') {
@@ -1392,7 +1896,7 @@
     if (file.size > 32 * 1024 * 1024) {dialogError(new Error('This backup is larger than 32 MB. Choose a smaller Resonance JSON backup.'));return;}
     try {
       const payload = JSON.parse(await file.text());
-      if (![1,2].includes(payload?.schema_version) || !Array.isArray(payload.accounts) || !Array.isArray(payload.reviews) || !payload.settings) throw new Error('Choose a Resonance backup exported from Settings. Other platform exports aren’t supported here.');
+      if (![1,2,3].includes(payload?.schema_version) || !Array.isArray(payload.accounts) || !Array.isArray(payload.reviews) || !payload.settings) throw new Error('Choose a Resonance backup exported from Settings. Other platform exports aren’t supported here.');
       importPayload = payload;
       const importedRequests = Array.isArray(payload.action_requests) ? payload.action_requests.length : 0;
       const body = `<p class="detail-text">${esc(file.name)}</p><div class="import-preview"><strong>${payload.accounts.length}</strong> accounts<br><strong>${payload.reviews.length}</strong> review observations<br><strong>${importedRequests}</strong> saved choices and requests<br>Saved preferences and boundary decisions, when included.</div><p class="detail-text">This adds new records and applies saved preferences and compatible updates. Conflicting original evidence is rejected. Other records already in this workspace stay in place.</p><div class="scope-strip">${icon('info')}<span>The whole backup is checked before anything is saved. Imported pending requests will wait for your confirmation. Only import a backup you trust.</span></div>`;
@@ -1523,12 +2027,23 @@
         Object.assign(accountWalk,{identity_mode:identity,daring:value('daring'),sfw_only:identity !== 'alias' || data.has('sfw_only')});
         const {platform,handle,url,identity_mode,daring,sfw_only} = accountWalk;
         // Keep the saved ID before reloading so a failed refresh cannot add it twice.
-        if (!accountWalk.saved) {
-          const result = await api('/api/accounts','POST',{platform,handle,url,display_name:'',identity_mode,daring,sfw_only});
-          accountWalk.saved = result.account.id;
+        const walk = accountWalk;
+        if (!walk.saved) {
+          if (walk.posting) return;
+          // A found account is saved only while its result is still the held, unexpired one, and never twice.
+          const problem = discoverySaveProblem(walk);
+          if (problem) throw new Error(problem);
+          walk.posting = true;
+          try {
+            const result = await api('/api/accounts','POST',{platform,handle,url,display_name:'',identity_mode,daring,sfw_only});
+            walk.saved = result.account.id;
+          } finally {walk.posting = false;}
+          if (walk.discovered) discovery?.discard(walk.discovered.provider);
         }
         if (!await reload()) throw new Error('The account was saved. Retry to refresh it before continuing.');
-        accountWalk.step = 'signin';
+        if (accountWalk !== walk) return;
+        if (walk.route === 'first-post') {const savedId = walk.saved;accountWalk = null;excerptForm(savedId);return;}
+        walk.step = 'signin';
         accountWalkDialog();
       } else if (form.getAttribute('id') === 'account-form') {
         const identity = value('identity_mode');
@@ -1625,10 +2140,37 @@
     else if (action === 'clear-samples') await switchSamples(button,true);
     else if (action === 'play-sample') playSample(id);
     else if (action === 'sample-decision') await sampleDecision(button);
-    else if (action === 'welcome-paste') {closeDialogIfOpen();navigate('draft');}
+    else if (action === 'welcome-paste') {if (state.data.accounts.length) excerptForm(); else startAccountWalk('','first-post');}
+    else if (action === 'draft-no-account') {accountWalk = null;closeDialogIfOpen();navigate('draft');}
+    else if (action === 'reader-check-all') readerStart(readerAllIds());
+    else if (action === 'reader-check-account') readerStart([id]);
+    else if (action === 'reader-first-check') {readerAccountDialog(id);readerStart([id]);}
+    else if (action === 'reader-account-dialog') readerAccountDialog(id);
+    else if (action === 'reader-cancel') readerClient?.cancel();
+    else if (action === 'discovery-find') discoveryStart();
+    else if (action === 'discovery-toggle') discoveryToggle(button.dataset.provider,button.checked);
+    else if (action === 'discovery-cancel') discoveryCancel();
+    else if (action === 'discovery-discard') discoveryDiscard(button.dataset.provider);
+    else if (action === 'discovery-use') discoveryUse(button);
+    else if (action === 'reader-setup') readerSetupDialog();
+    else if (action === 'reader-options') {if (!readerClient?.openOptions()) toast('Reader settings can only be opened from Resonance in the browser that has the reader.');}
+    else if (action === 'reader-probe') readerClient?.probe();
+    else if (action === 'reader-retry') readerClient?.retrySave();
+    else if (action === 'reader-lookup') await readerClient?.checkSaveStatus();
+    else if (action === 'reader-dismiss') {readerClient?.dismiss();renderReaderPanels();}
+    else if (action === 'reader-receipt') await readerReceiptDialog(id);
+    else if (action === 'reader-receipts') readerReceiptsDialog();
+    else if (action === 'reader-corpus') await readerCorpusDialog(id);
+    else if (action === 'reader-corpus-more') await readerCorpusDialog(readerCorpus?.accountId,true);
+    else if (action === 'reader-findings') {closeDialogIfOpen();navigate('review',{account:id,status:'all'});}
     else if (action === 'walk-platform') {accountWalk.platform = button.dataset.platform;accountWalk.step = 'identity';accountWalkDialog();}
     else if (action === 'walk-back') {accountWalk.step = button.dataset.step;accountWalkDialog();}
-    else if (action === 'account-walk-done') {accountWalk = null;await howPostsArrive();}
+    else if (action === 'account-walk-done') {
+      const found = accountWalk?.route === 'discovery';
+      accountWalk = null;
+      if (found) {closeDialogIfOpen();navigate('accounts');toast('Account added. Nothing was read yet; use Check now when you want to.');}
+      else await howPostsArrive();
+    }
     else if (action === 'connect-assistant') await connectAssistant();
     else if (action === 'copy-assistant') {await navigator.clipboard.writeText($('#assistant-sentence').value);toast('Sentence copied. Give it to your assistant.');}
     else if (action === 'import-from-welcome') {settingsDialog();await loadDataFolder();$('#import-file')?.click();}
@@ -1638,6 +2180,7 @@
     else if (action === 'add-excerpt') excerptForm(button.dataset.account || '');
     else if (action === 'add-review') reviewForm(button.dataset.account || '');
     else if (action === 'add-strength') reviewForm('','strength');
+    else if (action === 'inbox-update') await updateInboxRequest(button);
     else if (action === 'review-detail') reviewDetail(id);
     else if (action === 'flag-detail') reviewDetail(id,true);
     else if (action === 'posts-view-explain') openDialog(dialogShell('Posts in this view','One card for one saved source.', '<p>The count follows the status, account, finding and search filters above. A card brings together observations about the same original post; it does not count each observation as another post.</p>','<button class="button quiet" data-action="close-dialog">Done</button><button class="button primary" data-action="all-posts">Show all posts</button>'));
@@ -1789,11 +2332,12 @@
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && state.view === 'draft' && !dialog.open) {event.preventDefault();checkDraft();}
   });
   dialog.addEventListener('click',event => {if (event.target === dialog) {const rect = dialog.getBoundingClientRect();if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeDialog();}});
-  dialog.addEventListener('close',() => {if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({preventScroll:true});if (state.refreshPending) updateMonitoringView();if (state.communicationRefreshPending) updateCommunicationView();if (state.sourceRefreshPending) updateSourceView();refreshMonitoring();});
+  dialog.addEventListener('close',() => {if (readerDialogKind === 'setup') discoveryDialogClosed();readerDialogKind = '';readerCorpus = null;readerCorpusSequence++;if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({preventScroll:true});if (state.refreshPending) updateMonitoringView();if (state.communicationRefreshPending) updateCommunicationView();if (state.sourceRefreshPending) updateSourceView();refreshMonitoring();});
   window.addEventListener('hashchange',() => {state.view = navNames[location.hash.slice(1)] ? location.hash.slice(1) : 'overview';render();$('#main').focus({preventScroll:true});});
   window.addEventListener('online',() => {if (!state.connected) refreshMonitoring();});
   document.addEventListener('visibilitychange',() => {if (document.visibilityState === 'visible') refreshMonitoring();});
   document.addEventListener('focusout',() => {if (state.refreshPending) setTimeout(updateMonitoringView,0);if (state.communicationRefreshPending) setTimeout(updateCommunicationView,0);if (state.sourceRefreshPending) setTimeout(updateSourceView,0);});
+  if (readerClient) {readerClient.subscribe(renderReaderPanels);readerClient.attach();readerClient.probe();}
   setInterval(refreshMonitoring,60000);
   matchMedia('(prefers-color-scheme: light)').addEventListener('change',applyTheme);
   state.view = navNames[location.hash.slice(1)] ? location.hash.slice(1) : 'overview';

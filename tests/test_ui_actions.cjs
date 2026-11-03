@@ -133,13 +133,13 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
   assert.equal(storage.calls.at(-1).method,'POST');
   assert.equal(storage.calls.at(-1).body,'{}');
   assert.equal(openButton.disabled,false);
-  for (const version of [1,2]) {
+  for (const version of [1,2,3]) {
     const importer=setup();
     const payload={schema_version:version,accounts:[],reviews:[],settings:{}};
     await importer.ui.importFile({size:100,name:'synthetic.json',text:async()=>JSON.stringify(payload)});
     assert.ok(importer.html().includes('confirm-import'),`backup v${version} reaches confirmation`);
   }
-  for (const version of [true,0,3,'2']) {
+  for (const version of [true,0,4,'2']) {
     const importer=setup();
     const payload={schema_version:version,accounts:[],reviews:[],settings:{}};
     await importer.ui.importFile({size:100,name:'synthetic.json',text:async()=>JSON.stringify(payload)});

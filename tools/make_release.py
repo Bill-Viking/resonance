@@ -10,19 +10,35 @@ import sys
 
 
 ROOT_FILES = frozenset('''AGENTS.md ASSISTANT.md AUTHORING.md CHANGELOG.md INTEGRATIONS.md LICENSE
-PRODUCT.md README.md SECURITY.md VERSION monitor.py policy.py release.json
+PRODUCT.md README.md SECURITY.md VERSION monitor.py policy.py reader_checks.py release.json
 requirements.txt resonance resonance.bat samples.py server.py workflow.py .gitignore'''.split())
 PUBLIC_DIRECTORIES = ('static/', 'examples/', 'tests/', 'mac-launcher/')
-PUBLIC_DOCS = frozenset(('docs/ACTIONS.md', 'docs/MONITORING.md'))
-PUBLIC_TOOLS = frozenset(('tools/make_release.py', '.github/workflows/checks.yml',
+PUBLIC_DOCS = frozenset(('docs/ACTIONS.md', 'docs/DESKTOP.md', 'docs/MONITORING.md', 'docs/READER-PRIVACY.md'))
+# Listed one by one: a new tool or workflow is private until someone adds it here.
+PUBLIC_DESKTOP = frozenset(('desktop/launch.py', 'desktop/requirements-build.txt', 'desktop/hooks/hook-workflow.py'))
+PUBLIC_TOOLS = frozenset(('tools/make_release.py', 'tools/build_desktop.py', 'tools/build_reader.py',
+                          '.github/workflows/checks.yml', '.github/workflows/desktop-candidate.yml',
                           '.claude/skills/resonance/SKILL.md'))
+# The production Resonance Reader package, one file at a time. A new
+# file in browser-reader/ stays private until someone adds it here.
+PUBLIC_READER = frozenset('browser-reader/' + name for name in '''README.md bridge.js manifest.json options.html
+options.js popup.html popup.js reader.js shared.js worker.js icon-16.png icon-32.png icon-128.png'''.split())
+# Every Node suite that must pass inside the exported tree. The reader suites run from synthetic
+# fixtures that ship under tests/, never from experiments/.
+NODE_SUITES = ('tests/test_ui_actions.cjs', 'tests/test_ui_communication.cjs', 'tests/test_ui_today.cjs',
+               'tests/test_ui_reader.cjs', 'tests/test_browser_reader.cjs', 'tests/test_reader_discovery.cjs',
+               'tests/test_reader_pipeline.cjs')
 
 
 def public_path(name):
     path = Path(name)
     return (not path.is_absolute() and '..' not in path.parts and
-            (name in ROOT_FILES or name in PUBLIC_DOCS or name in PUBLIC_TOOLS or
-             name.startswith(PUBLIC_DIRECTORIES)))
+            (name in ROOT_FILES or name in PUBLIC_DOCS or name in PUBLIC_TOOLS or name in PUBLIC_DESKTOP or
+             name in PUBLIC_READER or name.startswith(PUBLIC_DIRECTORIES)))
+
+
+def validation_commands():
+    return ([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests'], *(['node', suite] for suite in NODE_SUITES))
 
 
 def git(root, *args):
@@ -85,10 +101,7 @@ def main():
         root = Path(__file__).resolve().parents[1]
         output, count = export(root, args.out, args.version)
         # Run only the exported code and its synthetic temporary fixtures.
-        for command in ([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests'],
-                        ['node', 'tests/test_ui_actions.cjs'],
-                        ['node', 'tests/test_ui_communication.cjs'],
-                        ['node', 'tests/test_ui_today.cjs']):
+        for command in validation_commands():
             subprocess.run(command, cwd=output, check=True)
         git(output, 'init', '-b', 'main')
         git(output, 'config', 'user.name', 'Resonance contributors')

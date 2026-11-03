@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import policy
+import reader_checks
 import workflow
 import samples
 from pathlib import Path
@@ -47,7 +48,7 @@ MAX_FINDING_TEXT = 20000
 MAX_FINDING_QUOTES = 20
 MAX_FINDING_QUOTE = 500
 THEME_CHOICES = ('dark', 'light', 'system', 'phosphor', 'midnight')
-STATIC = {'/': ('index.html', 'text/html'), '/index.html': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/styles.css': ('styles.css', 'text/css'), '/manifest.webmanifest': ('manifest.webmanifest', 'application/manifest+json'), '/sw.js': ('sw.js', 'text/javascript'), '/icon.svg': ('icon.svg', 'image/svg+xml')}
+STATIC = {'/': ('index.html', 'text/html'), '/index.html': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/reader-client.js': ('reader-client.js', 'text/javascript'), '/account-discovery.js': ('account-discovery.js', 'text/javascript'), '/styles.css': ('styles.css', 'text/css'), '/manifest.webmanifest': ('manifest.webmanifest', 'application/manifest+json'), '/sw.js': ('sw.js', 'text/javascript'), '/icon.svg': ('icon.svg', 'image/svg+xml')}
 
 
 class Invalid(ValueError):
@@ -443,6 +444,144 @@ def flag_evidence_record(data):
         string(data[key], key.capitalize(), limit, key in ('title', 'detail', 'rule', 'category'))
     url(data['source_url']); timestamp(data['captured_at'])
     return data
+
+
+MAIL_PLATFORMS = ('Gmail', 'Outlook')
+INBOX_STATES = ('needs_review', 'prepared', 'done', 'dismissed')
+INBOX_STATE_LABEL = {'needs_review': 'Needs review', 'prepared': 'Prepared', 'done': 'Done', 'dismissed': 'Dismissed'}
+# A request may only move forward by an explicit local choice; done is final.
+INBOX_TRANSITIONS = {'needs_review': ('prepared', 'dismissed'), 'prepared': ('prepared', 'done', 'dismissed', 'needs_review'),
+                     'dismissed': ('needs_review',), 'done': ()}
+INBOX_FIELDS = {'id', 'account_id', 'kind', 'source_url', 'source_key', 'parent_url', 'text', 'observed_at', 'last_seen_at',
+                'evidence', 'state', 'revision', 'evaluation', 'proposal_kind', 'proposal', 'handled_note',
+                'receipt_url', 'receipt_note', 'created_at', 'updated_at', 'state_at', 'history'}
+INBOX_ITEM_FIELDS = {'account_id', 'kind', 'visibility', 'source_url', 'parent_url', 'text', 'observed_at', 'evidence'}
+INBOX_EVIDENCE_INPUT = {'checked_at', 'status', 'platform', 'handle', 'profile_url', 'author_handle', 'author_profile_url', 'detail'}
+INBOX_EVIDENCE_FIELDS = INBOX_EVIDENCE_INPUT | {'visibility', 'basis', 'expected'}
+INBOX_HISTORY_FIELDS = {'revision', 'text', 'observed_at', 'state', 'evaluation', 'proposal_kind', 'proposal',
+                        'handled_note', 'receipt_url', 'receipt_note', 'superseded_at'}
+INBOX_UPDATE_FIELDS = {'state', 'revision', 'evaluation', 'proposal_kind', 'proposal', 'handled_note', 'receipt_url', 'receipt_note'}
+# Computed for display; never stored or exported.
+INBOX_PRESENTED = ('request_text', 'needs_attention', 'outcome', 'published_by_resonance', 'grants_action_authority', 'scope_note')
+INBOX_SCOPE_NOTE = ('Local request intake only. An assistant must read the comment and import it; Resonance watches nothing. '
+                    'Being addressed to RES grants no account access or action authority, and nothing here edits, replies, deletes or publishes.')
+INBOX_BATCH_LIMIT = 50
+INBOX_RECORD_LIMIT = 2000
+INBOX_HISTORY_LIMIT = 10
+INBOX_CLOCK_SKEW_SECONDS = 60
+
+
+def not_future(value, name):
+    if (instant(value) - instant(now())).total_seconds() > INBOX_CLOCK_SKEW_SECONDS:
+        raise Invalid(f'{name} cannot be in the future.')
+
+
+def inbox_evidence_record(data, account_id, source_url, observed_at):
+    """The assistant's dated claim that this public comment is the saved account's own.
+
+    It is an assertion by the external assistant, not platform attestation, and it
+    is compared against the saved account with the same rules as action identity checks.
+    """
+    fields(data, INBOX_EVIDENCE_FIELDS, INBOX_EVIDENCE_FIELDS)
+    timestamp(data['checked_at'])
+    if data['status'] != 'signed_in':
+        raise Invalid('The identity evidence must show the assistant signed in as the saved account; a signed-out or unavailable check is not accepted.')
+    choice(data['platform'], PLATFORMS, 'observed platform')
+    if data['visibility'] != 'public' or data['basis'] != 'assistant_reported':
+        raise Invalid('Identity evidence must describe a public comment and be marked as assistant-reported.')
+    for key in ('handle', 'author_handle'):
+        string(data[key], key.replace('_', ' ').capitalize(), 200, True)
+    for key in ('profile_url', 'author_profile_url'):
+        if not url(data[key]):
+            raise Invalid('Identity evidence needs the active account and comment author profile links.')
+    string(data['detail'], 'Identity observation', 2000, True)
+    expected = data['expected']
+    fields(expected, IDENTITY_ACCOUNT_FIELDS, IDENTITY_ACCOUNT_FIELDS)
+    account_record(dict(expected, access_checked_at=None, access_note='', created_at=data['checked_at']))
+    if expected['id'] != account_id:
+        raise Invalid('Identity evidence must belong to the request account.')
+    if expected['platform'] in MAIL_PLATFORMS:
+        raise Invalid('Mailboxes are outside this workflow; only public social comments and replies are accepted.')
+    if data['platform'] != expected['platform']:
+        raise Invalid('The observed platform does not match the saved account. Select the intended account.')
+    if not identity_observation_comparable(expected, data):
+        raise Invalid('A handle or supported profile link is missing or cannot be compared. Inspect the active account and comment author again.')
+    if not workflow.observed_identity_matches(expected, data['handle'], data['profile_url']):
+        raise Invalid('The observed active account does not match the saved account. Nothing was saved.')
+    if not workflow.observed_identity_matches(expected, data['author_handle'], data['author_profile_url']):
+        raise Invalid('The comment author does not match the saved account; only your own comments are accepted. Nothing was saved.')
+    if not workflow.comment_author_matches(expected, source_url):
+        raise Invalid('This comment link names a different account. Nothing was saved.')
+    if abs((instant(data['checked_at']) - instant(observed_at)).total_seconds()) > IDENTITY_TTL_SECONDS:
+        raise Invalid('The identity check must be made within five minutes of reading the comment.')
+    return data
+
+
+def inbox_record(data):
+    fields(data, INBOX_FIELDS, INBOX_FIELDS)
+    identifier(data['id'])
+    identifier(data['account_id'])
+    choice(data['kind'], ('comment', 'reply'), 'comment type')
+    if not url(data['source_url']):
+        raise Invalid('An exact comment link is required.')
+    if data['source_key'] != workflow.comment_source_key(data['source_url']):
+        raise Invalid('The saved comment key does not match its link.')
+    url(data['parent_url'])
+    string(data['text'], 'Comment text', 20000, True)
+    if workflow.res_address(data['text']) is None:
+        raise Invalid('The comment must begin with an address to RES followed by a request.')
+    for key in ('observed_at', 'last_seen_at', 'created_at', 'updated_at', 'state_at'):
+        timestamp(data[key])
+    if instant(data['last_seen_at']) < instant(data['observed_at']) or instant(data['updated_at']) < instant(data['created_at']):
+        raise Invalid('Saved request times are inconsistent.')
+    evidence = inbox_evidence_record(data['evidence'], data['account_id'], data['source_url'], data['observed_at'])
+    if not workflow.precise_comment_source(data['source_url'], evidence['expected']['platform'], data['kind']):
+        raise Invalid('This link does not identify one supported comment or reply. Use the comment’s own permanent link.')
+    choice(data['state'], INBOX_STATES, 'request state')
+    if type(data['revision']) is not int or not 1 <= data['revision'] <= 100000:
+        raise Invalid('Invalid request revision.')
+    string(data['evaluation'], 'Evaluation', 5000)
+    choice(data['proposal_kind'], ('', 'reply', 'edit'), 'proposal type')
+    string(data['proposal'], 'Proposal', 20000)
+    if bool(data['proposal_kind']) != bool(data['proposal'].strip()):
+        raise Invalid('A proposal needs its type (reply or edit) and text together.')
+    string(data['handled_note'], 'Handled note', 2000)
+    string(data['receipt_note'], 'Receipt note', 2000)
+    url(data['receipt_url'])
+    if bool(data['receipt_url']) != bool(data['receipt_note'].strip()):
+        raise Invalid('A receipt needs both its link and a note saying what was seen.')
+    state = data['state']
+    if state in ('prepared', 'done') and not data['evaluation'].strip():
+        raise Invalid('A prepared or done request needs an evaluation.')
+    if state == 'done' and not data['handled_note'].strip():
+        raise Invalid('A done request needs a note saying how it was handled.')
+    if state != 'done' and (data['handled_note'] or data['receipt_url']):
+        raise Invalid('Only a done request carries a handled note or receipt.')
+    if type(data['history']) is not list or len(data['history']) > INBOX_HISTORY_LIMIT:
+        raise Invalid(f'Request history keeps at most {INBOX_HISTORY_LIMIT} earlier versions.')
+    for entry in data['history']:
+        fields(entry, INBOX_HISTORY_FIELDS, INBOX_HISTORY_FIELDS)
+        if type(entry['revision']) is not int or not 1 <= entry['revision'] < data['revision']:
+            raise Invalid('Earlier request versions must precede the current revision.')
+        string(entry['text'], 'Earlier comment text', 20000, True)
+        timestamp(entry['observed_at']); timestamp(entry['superseded_at'])
+        choice(entry['state'], INBOX_STATES, 'earlier request state')
+        choice(entry['proposal_kind'], ('', 'reply', 'edit'), 'earlier proposal type')
+        for key, limit in (('evaluation', 5000), ('proposal', 20000), ('handled_note', 2000), ('receipt_note', 2000)):
+            string(entry[key], key.replace('_', ' ').capitalize(), limit)
+        url(entry['receipt_url'])
+    return data
+
+
+def present_inbox(record):
+    state = record['state']
+    outcome = {'needs_review': 'Needs your review. Nothing has been run or published.',
+               'prepared': 'Prepared locally. Nothing has been run or published.',
+               'dismissed': 'Dismissed locally. Nothing was run or published.',
+               'done': ('Receipt recorded. It is a note, and Resonance did not verify it.' if record['receipt_url']
+                        else 'Handled locally. Resonance published nothing.')}[state]
+    return dict(record, request_text=workflow.res_address(record['text']), needs_attention=state == 'needs_review',
+                outcome=outcome, published_by_resonance=False, grants_action_authority=False, scope_note=INBOX_SCOPE_NOTE)
 
 
 def brand_defaults():
@@ -970,7 +1109,18 @@ def edit_availability_contract(store, db):
     pass
 
 
-MIGRATIONS = (initialize_database, rename_action_scope, identity_check_guards, edit_availability_contract)
+def request_inbox_table(store, db):
+    # RES-addressed public comments are their own records, never findings or action
+    # requests. One row per account and exact comment link.
+    db.execute('CREATE TABLE IF NOT EXISTS request_inbox (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), source_key TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(account_id,source_key))')
+
+
+def reader_check_tables(store, db):
+    # Immutable reader receipts and exact-text corpus revisions. Pending jobs are never stored.
+    reader_checks.create_tables(db)
+
+
+MIGRATIONS = (initialize_database, rename_action_scope, identity_check_guards, edit_availability_contract, request_inbox_table, reader_check_tables)
 
 
 class Store:
@@ -1026,6 +1176,8 @@ class Store:
         db.execute('CREATE INDEX IF NOT EXISTS attestations_by_source ON attestations(account_id,source_key,execution_state)')
         db.execute('CREATE INDEX IF NOT EXISTS decisions_by_source ON source_decisions(account_id,source_key,evidence_fingerprint)')
         identity_check_guards(self, db)
+        request_inbox_table(self, db)
+        reader_check_tables(self, db)
         db.execute('INSERT OR IGNORE INTO settings VALUES (1, ?)', (json.dumps({'display_name': '', 'theme': 'dark'}),))
         db.execute('INSERT OR IGNORE INTO monitor_config VALUES(1, ?)', (canonical_json(monitor_defaults()),))
         db.execute('INSERT OR IGNORE INTO communication_brand VALUES(1, ?)', (canonical_json(brand_defaults()),))
@@ -1060,6 +1212,7 @@ class Store:
             # Restrict permissions before SQLite writes any private bytes.
             descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             os.close(descriptor)
+        first_snapshot = None
         with self.connect() as db:
             while True:
                 db.execute('BEGIN IMMEDIATE')
@@ -1071,7 +1224,9 @@ class Store:
                     return
                 target = version + 1
                 try:
-                    snapshot = self.migration_backup(target)
+                    snapshot = self.migration_backup(target, preserve=first_snapshot)
+                    if first_snapshot is None:
+                        first_snapshot = snapshot
                 except (OSError, sqlite3.Error):
                     raise Invalid('Resonance could not save an upgrade backup; check free space and folder permissions, then try again.') from None
                 try:
@@ -1090,7 +1245,7 @@ class Store:
                         raise Invalid(f'Resonance could not restore its upgrade backup; keep {snapshot} and ask for help before reopening the app.') from None
                     raise Invalid('Resonance could not upgrade your data and restored its backup; use your previous app version and report the failed upgrade.') from None
 
-    def migration_backup(self, target):
+    def migration_backup(self, target, preserve=None):
         folder = self.directory / 'backups' / 'auto'
         folder.mkdir(mode=0o700, parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
@@ -1103,8 +1258,14 @@ class Store:
             with closing(sqlite3.connect(self.path.as_uri() + '?mode=ro', uri=True)) as source:
                 with closing(sqlite3.connect(snapshot)) as destination:
                     source.backup(destination)
-            for old in sorted(folder.glob('*-before-v*.sqlite3'))[:-5]:
-                old.unlink()
+            snapshots = sorted(folder.glob('*-before-v*.sqlite3'))
+            # A long upgrade must not evict its original pre-upgrade state.
+            # Keep that one and the four newest step backups, still five total.
+            keep = set(snapshots[-5:] if preserve is None else
+                       [preserve] + [path for path in snapshots if path != preserve][-4:])
+            for old in snapshots:
+                if old not in keep:
+                    old.unlink()
         except (OSError, sqlite3.Error):
             snapshot.unlink(missing_ok=True)
             raise
@@ -1262,6 +1423,160 @@ class Store:
     def put_draft(db, record):
         db.execute('INSERT INTO mail_drafts(id,message_id,account_id,data) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET message_id=excluded.message_id,account_id=excluded.account_id,data=excluded.data',
                    (record['id'], record['message_id'], record['account_id'], canonical_json(record)))
+
+    @staticmethod
+    def put_inbox(db, record):
+        db.execute('INSERT INTO request_inbox(id,account_id,source_key,state,data) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET account_id=excluded.account_id,source_key=excluded.source_key,state=excluded.state,data=excluded.data',
+                   (record['id'], record['account_id'], record['source_key'], record['state'], canonical_json(record)))
+
+    def inbox_intake(self, db, body):
+        """Validate every item first; nothing is written unless all of them are acceptable."""
+        if getattr(self, 'is_sample', False):
+            raise Invalid('Practice samples never accept RES-addressed requests.')
+        fields(body, {'items'}, {'items'})
+        items = body['items']
+        if type(items) is not list or not 1 <= len(items) <= INBOX_BATCH_LIMIT:
+            raise Invalid(f'Send between 1 and {INBOX_BATCH_LIMIT} comments in one intake.')
+        changed_at = now()
+        seen, plan = set(), []
+        for item in items:
+            fields(item, INBOX_ITEM_FIELDS, INBOX_ITEM_FIELDS - {'parent_url'})
+            if samples.has_sample_data(item):
+                raise Invalid('Sample records cannot be saved with your own data.')
+            identifier(item['account_id'])
+            row = db.execute('SELECT data FROM accounts WHERE id=?', (item['account_id'],)).fetchone()
+            if row is None:
+                raise Invalid('Choose a saved account. Nothing was saved.')
+            account = account_record(json.loads(row[0]))
+            if account['platform'] in MAIL_PLATFORMS:
+                raise Invalid('Mailboxes are outside this workflow; only public social comments and replies are accepted.')
+            if item['visibility'] != 'public':
+                raise Invalid('Only public own comments and replies are accepted. Direct messages, private chats and message requests are out of scope.')
+            kind = choice(item['kind'], ('comment', 'reply'), 'comment type')
+            source_url = url(item['source_url'])
+            if not source_url or not workflow.precise_comment_source(source_url, account['platform'], kind):
+                raise Invalid('Use the comment’s own permanent link for this platform, not a post, profile, feed or search page.')
+            parent_url = url(item.get('parent_url', ''))
+            key = workflow.comment_source_key(source_url)
+            if parent_url and workflow.comment_source_key(parent_url) == key:
+                raise Invalid('The parent post link must differ from the comment link.')
+            if (account['id'], key) in seen:
+                raise Invalid('One intake cannot contain the same comment twice.')
+            seen.add((account['id'], key))
+            text = string(item['text'], 'Comment text', 20000, True)
+            if workflow.res_address(text) is None:
+                raise Invalid('This comment does not begin with an address to RES followed by a request (for example “RES: …”, “Hey RES, …” or “@RES …”). Nothing was saved.')
+            observed_at = timestamp(item['observed_at'])
+            not_future(observed_at, 'The observation time')
+            fields(item['evidence'], INBOX_EVIDENCE_INPUT, INBOX_EVIDENCE_INPUT)
+            not_future(timestamp(item['evidence']['checked_at']), 'The identity check time')
+            evidence = inbox_evidence_record(
+                dict(item['evidence'], visibility='public', basis='assistant_reported',
+                     expected={name: account[name] for name in IDENTITY_ACCOUNT_FIELDS}),
+                account['id'], source_url, observed_at)
+            existing = db.execute('SELECT data FROM request_inbox WHERE account_id=? AND source_key=?', (account['id'], key)).fetchone()
+            if existing is None:
+                record = dict(id=uid(), account_id=account['id'], kind=kind, source_url=source_url, source_key=key,
+                              parent_url=parent_url, text=text, observed_at=observed_at, last_seen_at=observed_at,
+                              evidence=evidence, state='needs_review', revision=1, evaluation='', proposal_kind='',
+                              proposal='', handled_note='', receipt_url='', receipt_note='', created_at=changed_at,
+                              updated_at=changed_at, state_at=changed_at, history=[])
+                plan.append(('created', inbox_record(record)))
+                continue
+            saved = inbox_record(json.loads(existing[0]))
+            if saved['text'] == text:
+                # The same words again: remember when they were last seen, reopen nothing.
+                if instant(observed_at) > instant(saved['last_seen_at']):
+                    saved = dict(saved, last_seen_at=observed_at)
+                    plan.append(('unchanged', inbox_record(saved)))
+                else:
+                    plan.append(('unchanged', None, saved))
+                continue
+            if instant(observed_at) <= instant(saved['last_seen_at']):
+                raise Invalid('A newer reading of this comment is already saved. Read the live comment again.')
+            earlier = {name: saved[name] for name in INBOX_HISTORY_FIELDS - {'superseded_at'}}
+            earlier['superseded_at'] = changed_at
+            record = dict(saved, kind=kind, parent_url=parent_url or saved['parent_url'], text=text, observed_at=observed_at,
+                          last_seen_at=observed_at, evidence=evidence, state='needs_review', revision=saved['revision'] + 1,
+                          evaluation='', proposal_kind='', proposal='', handled_note='', receipt_url='', receipt_note='',
+                          updated_at=changed_at, state_at=changed_at,
+                          history=(saved['history'] + [earlier])[-INBOX_HISTORY_LIMIT:])
+            plan.append(('changed', inbox_record(record)))
+        added = sum(1 for entry in plan if entry[0] == 'created')
+        if added and db.execute('SELECT count(*) FROM request_inbox').fetchone()[0] + added > INBOX_RECORD_LIMIT:
+            raise Invalid(f'The request inbox holds at most {INBOX_RECORD_LIMIT} comments. Nothing was saved.')
+        results = []
+        for entry in plan:
+            outcome, record = entry[0], entry[1]
+            if record is None:
+                record = entry[2]
+            else:
+                self.put_inbox(db, record)
+            results.append({'id': record['id'], 'outcome': outcome, 'state': record['state'], 'revision': record['revision'],
+                            'source_url': record['source_url'], 'account_id': record['account_id']})
+        if added or any(entry[0] == 'changed' for entry in plan):
+            self.log(db, 'Saved RES-addressed public comments for local review; nothing was run or published.')
+        return {'results': results, 'created': added,
+                'changed': sum(1 for entry in plan if entry[0] == 'changed'),
+                'unchanged': sum(1 for entry in plan if entry[0] == 'unchanged'),
+                'scope_note': INBOX_SCOPE_NOTE}
+
+    def inbox_update(self, db, request_id, body):
+        if getattr(self, 'is_sample', False):
+            raise Invalid('Practice samples never accept RES-addressed requests.')
+        fields(body, INBOX_UPDATE_FIELDS, {'state', 'revision'})
+        row = db.execute('SELECT data FROM request_inbox WHERE id=?', (request_id,)).fetchone()
+        if row is None:
+            raise LookupError('Request not found.')
+        record = inbox_record(json.loads(row[0]))
+        target = choice(body['state'], INBOX_STATES, 'request state')
+        if type(body['revision']) is not int or body['revision'] != record['revision']:
+            raise Invalid('This request changed since you loaded it. Refresh and review its current words.')
+        if target not in INBOX_TRANSITIONS[record['state']]:
+            raise Invalid(f'A request that is {INBOX_STATE_LABEL[record["state"]].lower()} cannot move to {INBOX_STATE_LABEL[target].lower()}.')
+        if target != 'done' and {'handled_note', 'receipt_url', 'receipt_note'} & set(body):
+            raise Invalid('Only marking a request done can record how it was handled.')
+        if target != 'prepared' and {'proposal_kind', 'proposal'} & set(body):
+            raise Invalid('A proposed reply or edit can only be saved while preparing a request.')
+        if target == 'done' and not string(body.get('handled_note', ''), 'Handled note', 2000).strip():
+            raise Invalid('Say how this request was handled before marking it done.')
+        record.update({name: body[name] for name in INBOX_UPDATE_FIELDS - {'state', 'revision'} if name in body})
+        changed_at = now()
+        record.update(state=target, updated_at=changed_at, state_at=changed_at)
+        record = inbox_record(record)
+        self.put_inbox(db, record)
+        self.log(db, 'Updated a local RES request note; nothing was run or published.')
+        return {'request': present_inbox(record)}
+
+    def inbox_snapshot(self, account_id=None, state='pending'):
+        """Read saved requests without upgrading or changing anything."""
+        if account_id is not None:
+            identifier(account_id)
+        choice(state, INBOX_STATES + ('pending', 'all'), 'request state')
+        if not self.read_only:
+            return Store(self.directory, read_only=True).inbox_snapshot(account_id, state)
+        with self.connect() as db:
+            db.execute('BEGIN')
+            if db.execute('PRAGMA user_version').fetchone()[0] != len(MIGRATIONS):
+                raise Invalid('This database needs the matching app version before its request inbox can be read.')
+            accounts = {account['id']: account for account in self.readonly_records(db, 'accounts', account_record)}
+            if account_id is not None and account_id not in accounts:
+                raise Invalid('The requested account does not exist.')
+            records = self.readonly_records(db, 'request_inbox', inbox_record, 'rowid DESC')
+            for record in records:
+                if record['account_id'] not in accounts:
+                    raise Invalid('A saved request references an unknown account.')
+            records = [record for record in records if account_id in (None, record['account_id'])]
+            counts = {name: sum(1 for record in records if record['state'] == name) for name in INBOX_STATES}
+            wanted = {'pending': ('needs_review', 'prepared'), 'all': INBOX_STATES}.get(state, (state,))
+            selected = [record for record in records if record['state'] in wanted]
+            limit = INBOX_BATCH_LIMIT
+            requests = []
+            for record in selected[:limit]:
+                account = accounts[record['account_id']]
+                requests.append(dict(present_inbox(record), account={key: account[key] for key in ('id', 'platform', 'handle', 'display_name')}))
+            return {'requests': requests, 'counts': counts, 'selected': state, 'returned': len(requests),
+                    'truncated': len(selected) > limit, 'scope_note': INBOX_SCOPE_NOTE}
 
     def invalidate_access(self, db, account_id, detail='Account identity changed. Request a fresh access check.'):
         if db.execute('SELECT 1 FROM account_access WHERE account_id=?', (account_id,)).fetchone():
@@ -1662,61 +1977,66 @@ class Store:
     def state(self, activity=True, monitor_limit=30):
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            accounts = [account_record(json.loads(r[0])) for r in db.execute('SELECT data FROM accounts ORDER BY rowid')]
-            reviews = [json.loads(r[0]) for r in db.execute('SELECT data FROM reviews ORDER BY rowid DESC')]
-            current = datetime.now(timezone.utc)
-            for review in reviews:
-                if review['status'] == 'snoozed' and datetime.fromisoformat(review['snoozed_until'].replace('Z', '+00:00')) <= current:
-                    review.update(status='open', snoozed_until=None, updated_at=now())
-                    self.put(db, 'reviews', review)
-            requests = []
-            for row in db.execute('SELECT data,confirmed FROM action_requests ORDER BY rowid DESC'):
-                request = action_request_record(json.loads(row['data']))
-                confirmed = bool(row['confirmed'])
-                if request['status'] == 'pending' and request['execution_state'] == 'queued' and not request['evidence_fingerprint']:
-                    request.update(execution_state='blocked',
-                                   blocker_reason='This legacy request needs a fresh source and evidence confirmation before execution.',
-                                   next_move='confirm_request', updated_at=now())
-                    self.put_action_request(db, request, confirmed=False)
-                    confirmed = False
-                request['_confirmed'] = confirmed
-                requests.append(request)
-            attestations = [attestation_record(json.loads(row[0])) for row in db.execute('SELECT data FROM attestations ORDER BY rowid DESC')]
-            decisions = [json.loads(r[0]) for r in db.execute('SELECT data FROM policy_decisions')]
-            for decision in decisions:
-                if decision['status'] == 'snoozed' and datetime.fromisoformat(decision['snoozed_until'].replace('Z', '+00:00')) <= current:
-                    decision.update(status='open', snoozed_until=None, updated_at=now())
-                    db.execute('UPDATE policy_decisions SET data=? WHERE id=?', (json.dumps(decision), decision['id']))
-            self.materialize_flag_evidence(db, accounts, reviews, decisions)
-            monitoring = self.monitoring(db, limit=monitor_limit)
-            monitoring['next_scheduled_check'] = workflow.next_scheduled_check(monitoring['config'])
-            evidence_runs = monitoring['runs'] if monitor_limit is None else self.monitoring(db, limit=None)['runs']
-            source_items, item_by_key = self.assemble_source_items(db, accounts, reviews, decisions, requests, attestations, evidence_runs)
-            scheduled_for = monitoring['next_scheduled_check']
-            presented = []
-            for request in requests:
-                item = item_by_key.get((request['account_id'], request['source_key']))
-                active = [value for value in requests if value['account_id'] == request['account_id'] and
-                          value['source_key'] == request['source_key'] and value['status'] == 'pending' and
-                          value['execution_state'] in ('queued', 'running', 'needs_verification', 'blocked')]
-                raw = dict(request); confirmed = raw.pop('_confirmed')
-                presented.append(self.present_action_request(
-                    raw, confirmed, scheduled_for if raw['status'] == 'pending' and raw['execution_state'] == 'queued' else None,
-                    item['evidence_fingerprint'] if item else None,
-                    bool(item and item['precise_source']), len(active) > 1, self.identity_preflight(db, request),
-                    item.get('edit_availability') if item else None))
-            result = {'schema_version': 2, 'settings': json.loads(db.execute('SELECT data FROM settings WHERE id=1').fetchone()[0]),
-                      'accounts': accounts, 'reviews': reviews, 'action_requests': presented,
-                      'attestations': attestations, 'source_decisions': [source_decision_record(json.loads(row[0])) for row in db.execute('SELECT data FROM source_decisions ORDER BY rowid DESC')],
-                      'flag_evidence': [flag_evidence_record(json.loads(row[0])) for row in db.execute('SELECT data FROM flag_evidence ORDER BY rowid')],
-                      'source_items': source_items}
-            result['monitoring'] = monitoring
-            result['communication'] = self.communication(db, accounts)
-            result['policy_decisions'] = decisions
-            result['policy_flags'] = self.flags(accounts, reviews, decisions)
-            if activity:
-                result['activity'] = [dict(r) for r in db.execute('SELECT id,at,description FROM activity ORDER BY at DESC,rowid DESC LIMIT 100')]
-            return result
+            return self.state_in(db, activity, monitor_limit)
+
+    def state_in(self, db, activity=True, monitor_limit=30):
+        accounts = [account_record(json.loads(r[0])) for r in db.execute('SELECT data FROM accounts ORDER BY rowid')]
+        reviews = [json.loads(r[0]) for r in db.execute('SELECT data FROM reviews ORDER BY rowid DESC')]
+        current = datetime.now(timezone.utc)
+        for review in reviews:
+            if review['status'] == 'snoozed' and datetime.fromisoformat(review['snoozed_until'].replace('Z', '+00:00')) <= current:
+                review.update(status='open', snoozed_until=None, updated_at=now())
+                self.put(db, 'reviews', review)
+        requests = []
+        for row in db.execute('SELECT data,confirmed FROM action_requests ORDER BY rowid DESC'):
+            request = action_request_record(json.loads(row['data']))
+            confirmed = bool(row['confirmed'])
+            if request['status'] == 'pending' and request['execution_state'] == 'queued' and not request['evidence_fingerprint']:
+                request.update(execution_state='blocked',
+                               blocker_reason='This legacy request needs a fresh source and evidence confirmation before execution.',
+                               next_move='confirm_request', updated_at=now())
+                self.put_action_request(db, request, confirmed=False)
+                confirmed = False
+            request['_confirmed'] = confirmed
+            requests.append(request)
+        attestations = [attestation_record(json.loads(row[0])) for row in db.execute('SELECT data FROM attestations ORDER BY rowid DESC')]
+        decisions = [json.loads(r[0]) for r in db.execute('SELECT data FROM policy_decisions')]
+        for decision in decisions:
+            if decision['status'] == 'snoozed' and datetime.fromisoformat(decision['snoozed_until'].replace('Z', '+00:00')) <= current:
+                decision.update(status='open', snoozed_until=None, updated_at=now())
+                db.execute('UPDATE policy_decisions SET data=? WHERE id=?', (json.dumps(decision), decision['id']))
+        self.materialize_flag_evidence(db, accounts, reviews, decisions)
+        monitoring = self.monitoring(db, limit=monitor_limit)
+        monitoring['next_scheduled_check'] = workflow.next_scheduled_check(monitoring['config'])
+        evidence_runs = monitoring['runs'] if monitor_limit is None else self.monitoring(db, limit=None)['runs']
+        source_items, item_by_key = self.assemble_source_items(db, accounts, reviews, decisions, requests, attestations, evidence_runs)
+        scheduled_for = monitoring['next_scheduled_check']
+        presented = []
+        for request in requests:
+            item = item_by_key.get((request['account_id'], request['source_key']))
+            active = [value for value in requests if value['account_id'] == request['account_id'] and
+                      value['source_key'] == request['source_key'] and value['status'] == 'pending' and
+                      value['execution_state'] in ('queued', 'running', 'needs_verification', 'blocked')]
+            raw = dict(request); confirmed = raw.pop('_confirmed')
+            presented.append(self.present_action_request(
+                raw, confirmed, scheduled_for if raw['status'] == 'pending' and raw['execution_state'] == 'queued' else None,
+                item['evidence_fingerprint'] if item else None,
+                bool(item and item['precise_source']), len(active) > 1, self.identity_preflight(db, request),
+                item.get('edit_availability') if item else None))
+        result = {'schema_version': 2, 'settings': json.loads(db.execute('SELECT data FROM settings WHERE id=1').fetchone()[0]),
+                  'accounts': accounts, 'reviews': reviews, 'action_requests': presented,
+                  'attestations': attestations, 'source_decisions': [source_decision_record(json.loads(row[0])) for row in db.execute('SELECT data FROM source_decisions ORDER BY rowid DESC')],
+                  'flag_evidence': [flag_evidence_record(json.loads(row[0])) for row in db.execute('SELECT data FROM flag_evidence ORDER BY rowid')],
+                  'source_items': source_items}
+        result['request_inbox'] = [present_inbox(inbox_record(json.loads(row[0]))) for row in db.execute('SELECT data FROM request_inbox ORDER BY rowid DESC')]
+        result['monitoring'] = monitoring
+        result['reader_check_summary'] = reader_checks.summaries(db)
+        result['communication'] = self.communication(db, accounts)
+        result['policy_decisions'] = decisions
+        result['policy_flags'] = self.flags(accounts, reviews, decisions)
+        if activity:
+            result['activity'] = [dict(r) for r in db.execute('SELECT id,at,description FROM activity ORDER BY at DESC,rowid DESC LIMIT 100')]
+        return result
 
     @staticmethod
     def flags(accounts, reviews, decisions):
@@ -1728,14 +2048,25 @@ class Store:
         return flags
 
     def backup(self):
-        state = self.state(activity=False, monitor_limit=None)
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            return self.backup_in(db)
+
+    def backup_in(self, db):
+        """The portable backup, assembled inside the caller's open transaction."""
+        state = self.state_in(db, activity=False, monitor_limit=None)
         state.pop('policy_flags')
         state.pop('source_items')
+        state.pop('reader_check_summary')
+        state['schema_version'] = 3
         state['reviews'].sort(key=lambda value: (value['reviewed_at'], value['id']), reverse=True)
         for request in state['action_requests']:
             for field in ('confirmation_required', 'scheduled_for', 'can_cancel', 'can_execute', 'can_prepare', 'identity_preflight', 'edit_preflight'):
                 request.pop(field)
         state['monitoring'].pop('next_scheduled_check', None)
+        state['request_inbox'] = [{key: value for key, value in record.items() if key not in INBOX_PRESENTED}
+                                  for record in state['request_inbox']]
+        state.update(reader_checks.export_tables(db))
         return state
 
     def work(self):
@@ -2788,17 +3119,59 @@ class Store:
                 if result['signals']:
                     result['summary'] = 'Local writing and account-policy checks found wording to consider. Context and intent still matter.'
                 return 200, result
+            if path == '/api/request-inbox/intake' and method == 'POST':
+                return 201, self.inbox_intake(db, body)
+            if re.fullmatch(r'/api/request-inbox/[A-Za-z0-9_-]{1,100}', path) and method == 'PATCH':
+                return 200, self.inbox_update(db, path.rsplit('/', 1)[1], body)
             if path == '/api/import' and method == 'POST':
                 return 200, self.import_backup(db, body)
             raise LookupError('Endpoint not found.')
+
+    def validate_inbox_import(self, db, incoming, accounts):
+        """Restored requests are local notes only: no record here can start, authorize or prove a provider action."""
+        if type(incoming) is not list or len(incoming) > INBOX_RECORD_LIMIT:
+            raise Invalid(f'Backup request inbox must be a list of at most {INBOX_RECORD_LIMIT} records.')
+        existing = {record['id']: record for record in
+                    (inbox_record(json.loads(row[0])) for row in db.execute('SELECT data FROM request_inbox'))}
+        owners = {(record['account_id'], record['source_key']): record['id'] for record in existing.values()}
+        ids, sources, accepted = set(), set(), []
+        for value in incoming:
+            record = inbox_record(value)
+            source = (record['account_id'], record['source_key'])
+            if record['id'] in ids or source in sources:
+                raise Invalid('Backup contains the same request or comment twice.')
+            ids.add(record['id'])
+            sources.add(source)
+            account = accounts.get(record['account_id'])
+            if account is None or account['platform'] in MAIL_PLATFORMS:
+                raise Invalid('A saved request references an unknown or mailbox account.')
+            if (account['platform'] != record['evidence']['expected']['platform']
+                    or not workflow.comment_author_matches(account, record['source_url'])
+                    or not workflow.observed_identity_matches(account, record['evidence']['author_handle'], record['evidence']['author_profile_url'])):
+                raise Invalid('A saved request does not belong to the saved account that now has its identifier.')
+            saved = existing.get(record['id'])
+            if saved is not None:
+                if (saved['account_id'], saved['source_key']) != source:
+                    raise Invalid('A different request already uses this request ID.')
+                # An older backup never rolls back a newer local decision.
+                if (record['revision'], instant(record['updated_at'])) <= (saved['revision'], instant(saved['updated_at'])):
+                    continue
+            elif owners.get(source) not in (None, record['id']):
+                raise Invalid('Another saved request already uses this exact comment.')
+            accepted.append(record)
+        if len(existing) + sum(1 for record in accepted if record['id'] not in existing) > INBOX_RECORD_LIMIT:
+            raise Invalid(f'The request inbox holds at most {INBOX_RECORD_LIMIT} comments.')
+        return accepted
 
     def import_backup(self, db, body):
         if samples.has_sample_data(body):
             raise Invalid('Sample records cannot be imported with your own data.')
         self.materialize_flag_evidence(db)
-        fields(body, {'schema_version', 'settings', 'accounts', 'reviews', 'policy_decisions', 'flag_evidence', 'action_requests', 'attestations', 'source_decisions', 'monitoring', 'communication'}, {'schema_version', 'settings', 'accounts', 'reviews'})
-        if type(body['schema_version']) is not int or body['schema_version'] not in (1, 2):
+        fields(body, {'schema_version', 'settings', 'accounts', 'reviews', 'policy_decisions', 'flag_evidence', 'action_requests', 'attestations', 'source_decisions', 'request_inbox', 'monitoring', 'communication', 'reader_checks', 'reader_sources', 'reader_revisions'}, {'schema_version', 'settings', 'accounts', 'reviews'})
+        if type(body['schema_version']) is not int or body['schema_version'] not in (1, 2, 3):
             raise Invalid('Unsupported backup version.')
+        if body['schema_version'] < 3 and {'reader_checks', 'reader_sources', 'reader_revisions'} & set(body):
+            raise Invalid('Reader check history needs backup format 3.')
         settings_record(body['settings'])
         if type(body['accounts']) is not list or type(body['reviews']) is not list or len(body['accounts']) > 10000 or len(body['reviews']) > 10000:
             raise Invalid('Backup accounts and reviews must be lists of at most 10000 records.')
@@ -2951,6 +3324,8 @@ class Store:
             if record['id'] in existing_source_decisions and canonical_json(record) != canonical_json(existing_source_decisions[record['id']]):
                 raise Invalid('A different source decision already uses this identifier.')
             normalized_source_decisions.append(record)
+        normalized_inbox = self.validate_inbox_import(db, body.get('request_inbox', []), resulting_accounts)
+        reader_import = reader_checks.validate_import(sys.modules[__name__], db, body, resulting_accounts)
         monitoring = body.get('monitoring')
         if 'monitoring' in body:
             fields(monitoring, {'config', 'runs'}, {'config', 'runs'})
@@ -2985,6 +3360,9 @@ class Store:
             self.put_attestation(db, record)
         for record in normalized_source_decisions:
             self.put_source_decision(db, record)
+        for record in normalized_inbox:
+            self.put_inbox(db, record)
+        reader_checks.apply_import(db, *reader_import)
         if monitoring is not None:
             db.execute('UPDATE monitor_config SET data=? WHERE id=1', (canonical_json(monitoring['config']),))
             for run in monitoring['runs']:
@@ -2996,6 +3374,10 @@ class Store:
             self.invalidate_access(db, account_id)
         db.execute('UPDATE settings SET data=? WHERE id=1', (json.dumps(body['settings']),))
         self.log(db, 'Imported a Resonance backup.')
+        if any(reader_import[:3]):
+            # The merged result must itself be restorable; otherwise this whole transaction rolls back.
+            reader_checks.ensure_capacity(sys.modules[__name__], self, db, 'Importing this history would make your portable '
+                                          'backup too large to restore. Nothing was imported.')
         return {'accounts': len(account_ids), 'reviews': len(review_ids)}
 
 
@@ -3103,6 +3485,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_content(200, self.server.store.state())
             elif path == '/api/export':
                 self.send_content(200, self.server.store.backup(self.workspace_token()), download='resonance-backup.json')
+            elif re.fullmatch(r'/api/checks/[a-f0-9]{32}', path):
+                self.send_content(200, self.server.store.read_check(path.rsplit('/', 1)[1], self.workspace_token()))
+            elif path == '/api/corpus':
+                self.send_content(200, self.server.store.read_corpus(parse_qs(urlsplit(self.path).query, keep_blank_values=True), self.workspace_token()))
+            elif re.fullmatch(r'/api/corpus/sources/[A-Za-z0-9_-]{1,100}/revisions', path):
+                self.send_content(200, self.server.store.read_corpus(parse_qs(urlsplit(self.path).query, keep_blank_values=True), self.workspace_token(), path.split('/')[4]))
             elif path == '/api/data-folder':
                 self.send_content(200, self.server.store.data_folder_details())
             elif path == '/api/assistant':

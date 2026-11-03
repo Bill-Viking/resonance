@@ -2,15 +2,15 @@
 
 **See what you have said online and how it may land. Fix it in your own voice. Privately, on your own computer.**
 
-`0.1.0-preview.6 · source preview`
+`0.1.0-preview.7 · source preview`
 
 Resonance is a small app that runs on your own computer. It gathers your own posts, comments and replies into one place, marks the exact words that may land badly with the audience of that account, and helps you keep, change or remove each one. It has no account to create, no cloud behind it and no tracking inside it.
 
-This preview is for someone who can run one command, and who either pastes their own text or has an AI assistant that can use a browser. A double-click installer comes later.
+This source preview includes desktop build tooling and the source edition. A packaged desktop app opens without a separate Python installation. Desktop candidates are unsigned; installer distribution and fresh-user verification are still pending. The source edition below requires Python. See [desktop builds and use](docs/DESKTOP.md).
 
-**Account checks still need your external assistant.** This preview does not include a browser extension or a “Check now” button that reads your accounts automatically. Try the separate sample notebook before adding personal information. See [the release notes](CHANGELOG.md) for what is ready and what remains.
+**The browser reader is a preview, not available in a store yet.** The candidate includes account discovery, Check now, saved receipts and text history for at most three own X posts or YouTube comments per account. It requires the separate reader in the same browser and explicit site permission. Ordinary store installation is still a release gate. Paste text, use samples or have your external assistant bring in your posts in the meantime. Other saved platforms, including Instagram and Substack, use those routes. See [the release notes](CHANGELOG.md).
 
-## Start it
+## Start from source
 
 You need [Python](https://www.python.org/downloads/) 3.9 or newer. Get this folder onto your computer (**Code → Download ZIP**, or `git clone`), open a terminal in it, and run:
 
@@ -27,15 +27,18 @@ Your browser opens Resonance at `http://127.0.0.1:4317`. Leave the terminal wind
 
 Resonance opens on a Welcome page with three doors.
 
-1. **See it with sample posts.** Ten seconds, nothing to set up. The samples live in their own file, apart from anything of yours, under a banner that says so. **Clear samples** removes them.
-2. **Check something I wrote.** Paste a post, a comment or a reply and see what Resonance marks, and why.
-3. **Bring in my accounts.** One account at a time: pick the platform, paste your profile link or handle, say whether the account is under your real name or an alias and how daring it may be, then sign in to the platform in your own browser. Resonance never sees your password.
+1. **Set up account checks.** Check whether the separate reader is available in this browser. Supported account discovery asks you to confirm an account and its boundaries before saving it. Until the reader has a store listing, setup explains that limit and offers manual account addition.
+2. **Paste my first post.** Add an account, choose its boundaries, paste your writing and continue directly to the resulting review. Your passwords stay in your browser.
+3. **Try samples.** The samples live in their own file, apart from anything of yours, under a banner that says so. **Clear samples** removes them. Samples never read a real account.
 
 ## How your posts get in
 
 - **Paste them.** Always available, no assistant needed.
+- **Check now with the preview reader.** After setup, a deliberate click reads supported own text, saves a dated receipt with coverage gaps and makes local rule matches available for review. **See what was read** shows the exact saved text, including text with no matches. A saved account is not a current sign-in check. The reader never publishes, edits or deletes.
 - **Your assistant brings them.** If you use an AI assistant that can drive a browser and run a command, give it one sentence — *"Read ASSISTANT.md in my Resonance folder and run my Resonance check."* — and it does the rest: it reads your own posts where you are signed in, saves what it found, and your tiles fill in. [ASSISTANT.md](ASSISTANT.md) is the whole contract it follows, written to be read by you too. The short version: your own writing only, never private messages, and nothing on a platform is changed without your yes, at that moment, for that item.
 - **Your own data archive.** Importing a platform's "download your data" file is coming next.
+
+- **Comments addressed to RES.** If you leave a public comment or reply that starts with `RES:`, `Hey RES,` or `@RES`, your assistant can bring it in as a request for an evaluation and a proposed edit or follow-up. Resonance does not watch your accounts and reacts to nothing instantly: it appears under **RES requests** on Today only after your assistant has checked and imported it. Being addressed to RES grants no access and starts nothing. You review it, and anything posted, edited or removed still needs its own separate yes.
 
 Saved accounts can be on X, Reddit, YouTube, Instagram, Facebook, TikTok, LinkedIn, Discord, Substack and Threads, plus Gmail and Outlook mailboxes. Saving an account connects nothing. Threads can be saved by handle or profile link, and appears in ordinary account setup and reports; Resonance has no Threads reader or direct connection. What Resonance can show depends on what you paste or what your assistant was able to read, and every check says plainly what it covered and what it could not reach.
 
@@ -81,9 +84,9 @@ In one folder on your computer, outside this source folder:
 
 Resonance prints the folder it is using when it starts, and **Settings → Your data** shows it with its size and the last automatic backup. Set `RESONANCE_DATA_DIR` to use a different folder. Choose a private local folder that none of your sync tools shares: Resonance rejects repositories and the cloud-sync paths it recognizes, but it cannot detect every folder another program syncs.
 
-**Upgrades protect your data.** Before a new version changes the database it saves a copy under `backups/auto` in the data folder and keeps the last five. If the change fails, the copy is put back and Resonance tells you in one sentence.
+**Upgrades protect your data.** Before a new version changes the database it saves a copy under `backups/auto` in the data folder. It keeps up to five copies, preserving the original state for the whole upgrade alongside its newest step backups. If a step fails, its copy is put back and Resonance tells you in one sentence.
 
-**Keeping a copy is your choice.** Nothing leaves the folder automatically, and **Export backup** writes a file whenever you ask. Exports are readable JSON, including account names, saved text, context images, drafts and requests. This edition does not encrypt exported backups; keep them in a private location or encrypt them with your own trusted tool. A restored backup never carries permission to change anything; pending requests ask for your yes again.
+**Keeping a copy is your choice.** Nothing leaves the folder automatically, and **Export backup** writes a file whenever you ask. Exports are readable JSON, including account names, saved text, context images, drafts, requests and RES-addressed comments. This edition does not encrypt exported backups; keep them in a private location or encrypt them with your own trusted tool. A restored backup never carries permission to change anything; pending requests ask for your yes again.
 
 ## What it does not do
 

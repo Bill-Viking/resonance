@@ -15,6 +15,8 @@ import tempfile
 import threading
 import uuid
 
+import reader_checks
+
 
 SAMPLE_PREFIX = 'resonance-sample-'
 DEMO_NAME = 'demo.sqlite3'
@@ -197,6 +199,8 @@ class Workspace:
     def __init__(self, directory, store_type):
         self.store_type = store_type
         self.api = importlib.import_module(store_type.__module__)
+        # Pending reader checks live only here: never stored, exported or restored.
+        self.pending_checks = reader_checks.PendingChecks()
         self.directory = self.api.safe_data_directory(directory)
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         with workspace_lock(self.directory):
@@ -291,6 +295,8 @@ class Workspace:
     def mutate(self, method, path, body, token=None):
         with workspace_lock(self.directory):
             marker = self._checked(token)
+            if method == 'POST' and path in ('/api/samples', '/api/samples/clear'):
+                self.pending_checks.clear()
             if method == 'POST' and path == '/api/samples':
                 self.api.fields(body, set())
                 if marker['mode'] == 'samples':
@@ -323,7 +329,64 @@ class Workspace:
                     raise SampleError('Use the sample rehearsal to verify a sample request.')
             elif has_sample_data(body):
                 raise SampleError('Sample records cannot be saved with your own data.')
+            if method == 'POST' and path in ('/api/checks/begin', '/api/checks/cancel', '/api/checks'):
+                return self._reader_checks(marker, path, body)
             return self._store(marker).mutate(method, path, body)
+
+    def _reader_checks(self, marker, path, body):
+        api, store, token = self.api, self._store(marker), marker['token']
+        if path == '/api/checks/cancel':
+            return 200, reader_checks.cancel(api, self.pending_checks, body)
+
+        def load(ids):
+            with store.connect() as db:
+                rows = {row['id']: api.account_record(json.loads(row['data'])) for row in db.execute('SELECT id,data FROM accounts')}
+            if any(value not in rows for value in ids):
+                raise api.Invalid('Choose accounts that are saved in Resonance.')
+            return [rows[value] for value in ids]
+
+        def known(check_id):
+            with store.connect() as db:
+                return db.execute('SELECT 1 FROM reader_checks WHERE id=?', (check_id,)).fetchone() is not None
+
+        if path == '/api/checks/begin':
+            return 201, reader_checks.begin(api, self.pending_checks, token, body, load, known)
+        check_id = body.get('check_id') if isinstance(body, dict) else None
+        job = (self.pending_checks.get(check_id, token)
+               if isinstance(check_id, str) and reader_checks.CHECK_ID.fullmatch(check_id) else None)
+        with store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            code, result = reader_checks.commit(api, store, db, job, body)
+        if code == 201:
+            self.pending_checks.forget(check_id)
+        return code, result
+
+    def read_check(self, check_id, token=None):
+        with workspace_lock(self.directory):
+            marker = self._checked(token)
+            if marker['mode'] == 'samples':
+                raise SampleError('Reader checks are unavailable in samples. Clear samples to use your own data.')
+            if not reader_checks.CHECK_ID.fullmatch(check_id):
+                raise LookupError('Check not found.')
+            with self._store(marker).connect() as db:
+                receipt = reader_checks.stored_receipt(db, check_id)
+            if receipt is not None:
+                return receipt
+            job = self.pending_checks.get(check_id, marker['token'])
+            if job is None:
+                raise LookupError('Check not found.')
+            return {'status': 'pending', 'check_id': check_id, 'created_at': reader_checks.iso(job['at']),
+                    'expires_at': reader_checks.iso(job['expires'])}
+
+    def read_corpus(self, query, token=None, source_id=None):
+        with workspace_lock(self.directory):
+            marker = self._checked(token)
+            if marker['mode'] == 'samples':
+                raise SampleError('The reader corpus is unavailable in samples. Clear samples to use your own data.')
+            with self._store(marker).connect() as db:
+                if source_id is not None:
+                    return reader_checks.revision_page(self.api, db, source_id, query)
+                return reader_checks.corpus_page(self.api, db, query)
 
     def _rehearse(self, store, body):
         self.api.fields(body, {'request_id', 'decision'}, {'request_id', 'decision'})

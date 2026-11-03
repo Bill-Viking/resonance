@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Resonance Reader</title>
+  <style>
+    body { width: 300px; margin: 0; padding: 20px; color: #1f2937; background: #f8fafc; font: 14px/1.45 system-ui, sans-serif; }
+    h1 { margin: 0 0 8px; font-size: 17px; } p { margin: 0 0 12px; } strong { color: #9a3412; }
+    button { min-height: 40px; padding: 6px 12px; font: inherit; margin: 0 6px 6px 0; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <h1>Resonance Reader</h1>
+  <p><strong>Preview, read-only.</strong></p>
+  <p>Reads up to three of your own recent X posts or YouTube comments per account, after you click Check now in Resonance on <code>http://127.0.0.1:4317/</code>. It never posts, edits or deletes, and does not inspect photos or video. Resonance saves what was read; the extension saves nothing.</p>
+  <p>YouTube checks open a separate visible window; leave its tabs alone while it runs.</p>
+  <p>Site access is off until you allow it on the options page. The browser words it as access to the whole site; the reader's code is much narrower.</p>
+  <button type="button" id="open-app">Open Resonance</button>
+  <button type="button" id="open-options">Site access</button>
+  <script src="popup.js"></script>
+</body>
+</html>

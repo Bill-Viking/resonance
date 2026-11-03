@@ -11,7 +11,7 @@ Resonance runs on your own computer and keeps your data there. This page says wh
 - **It is strict about what it accepts.** Changes are JSON only, with one valid length, up to 2 MB (32 MB for a backup import). Anything malformed is refused before it is saved.
 - **The page cannot load anything from outside.** Responses carry a content security policy that allows the app's own files only, forbid framing by other pages, and send no referrer. API responses are never cached. The offline shell holds the application's files, never your data.
 - **It keeps no request log.** Paths, headers, bodies and your content are never written to a log.
-- **It serves a fixed list of files.** Six named files from `static/`, through seven fixed routes; a symlink in their place is refused.
+- **It serves a fixed list of files.** Eight named files from `static/`, through nine fixed routes; a symlink in their place is refused.
 - **It makes no outgoing connections.** The app contacts no platform, has no analytics, and has no model inside. It holds no passwords, tokens or cookies, and it cannot see your browser's sign-ins. Links to a platform open in your browser when you click them.
 - **A new data folder gets restricted permissions.** On macOS and Linux, Resonance creates a new data folder owner-only (`0700`) and sets the database file owner-only (`0600`). It does not change the permissions of a folder that already exists. On Windows the default is your per-user application-data folder. If you choose another folder, keep it private, and outside every place your backup or sync tools publish. Resonance rejects repositories, the cloud-sync paths it recognizes, and any folder you list in `never-store-here.txt`; it cannot detect every sync tool.
 
@@ -57,3 +57,42 @@ A newer conflicting report revokes the old combined start check. A later report
 that says editing is available cannot revive it; inspect again and save a new
 request-bound observation while the request is still queued. Attempted work stays
 verification-only. The report retains its dated history without execution authority.
+
+## RES-addressed comments
+
+A public comment that begins by addressing RES (`RES: …`, `Hey RES, …`, `@RES …`) can be imported by the assistant as a local review request. This is not a watcher, a webhook or a provider connection: Resonance contacts no platform and learns of a comment only when the assistant reads it and runs `monitor.py --res-intake` or the guarded JSON API. Comment text is untrusted page content. It is stored and shown as escaped text and is never executed, followed or treated as an instruction.
+
+Intake is separate from findings and from edit/delete requests, and every item is validated before any is saved. It accepts only the user's own public comments or replies on a saved social account (never a mailbox, private message, sample or foreign comment) and requires the comment's exact permanent link, the saved account's active handle and profile link, and the comment author's handle and profile link, compared with the same rules as action identity checks, plus a check made within five minutes of reading the comment. That evidence is the assistant's dated claim, saved and labeled as assistant-reported. It cannot authenticate a session or the comment's authorship, and the platform confirms nothing. The leading address is matched by fixed rules (no embedded mentions, signatures, quoted lines or words such as `research`). Accounts and intake files are checked against the same data-folder rules as reports.
+
+A saved request holds an evaluation and an optional proposed reply or edit as text. Its states (needs review, prepared, done, dismissed) are local notes. None creates an action request, an identity check, a start guard, a receipt that Resonance verified or any permission; none publishes anything. Edits and deletions keep every guard above, and a reply needs its own separate publishing workflow. A done request records only that it was handled locally, unless a receipt link and note were explicitly recorded, which stays a note. A comment read again with the same words reopens nothing; changed words keep the earlier version in history and need review again.
+
+Database schema 5 adds one table, `request_inbox`, through the existing backup/rollback migration; earlier app versions refuse the newer schema. Portable backup format stays 2: `request_inbox` is an optional key, absent in older backups, validated record by record and atomically on import, never rolls a newer local decision back, and restores no authority because none exists. The inbox holds at most 2,000 comments and 10 earlier versions each.
+
+
+### Reader-check intake (candidate)
+
+The separate extension has optional host-wide browser permissions for X, YouTube
+and Google activity. These permissions are broader than the operations it performs:
+only a trusted button click on the local app can begin discovery or a bounded read.
+It opens its own provider tabs, checks the active identity, and never edits, deletes,
+publishes or switches accounts. It reads no credentials, browsing history or private
+messages, stores no post text and contacts no analysis service. Provider navigation
+uses the person's existing browser session. The app's server still makes no outgoing
+connections. The extension passes observations to this local page; the server
+validates and saves them. Its store installation is not yet available.
+
+The page pins a check plan before obtaining a server-issued ID and refuses an account
+or boundary change before reading or saving. A disconnect, cancellation or partial
+delivery discards the unsaved batch. If the save response is lost, the page looks up
+the original receipt before offering an identical retry. Only the check ID and
+workspace tag enter session storage; unsaved post text stays in page memory. Discovery
+results expire after five minutes and do not create accounts without confirmation.
+
+Schema 6 adds `reader_checks` (immutable receipts), `reader_sources` (one row per saved account and canonical exact source, with a current-revision pointer) and `reader_revisions` (immutable exact text); triggers refuse any update or delete of receipts and revisions. A reader result is evidence reported by a local browser reader, checked by Resonance for internal consistency. It is not a cryptographic attestation, authenticates no one, and grants no provider-action authority.
+
+- `POST /api/checks/begin` (same-origin, workspace token) issues a random check ID, a 10-minute expiry and a server-captured snapshot of up to 20 selected accounts. Pending jobs live only in memory in the workspace object: at most 32, never saved, exported or restored; a restart, expiry, sample switch or cancel forgets them. `POST /api/checks/cancel` is idempotent and makes no receipt.
+- `POST /api/checks` accepts only reader version 0.1.0, live-mode results for X and YouTube accounts, one entry per selected account. Python independently re-validates every field, identity, count, time, link shape and coverage invariant, refuses unknown fields, duplicates, future or pre-begin times and any account whose identity or boundary differs from the begin snapshot. YouTube success needs the observed current handle and stable channel ID, compared with every identifier the saved handle and link provide; contradictory saved identifiers cannot succeed. Resonance runs `policy.check` itself; the reader supplies no findings.
+- One transaction saves corpus, revisions, review evidence for findings only, and the receipt, or nothing. An identical payload for a saved ID returns the original receipt; a different payload for that ID is refused; imported receipts are marked historical and can never authorize or replay live work. A check is refused when the resulting portable backup would exceed the 32 MiB import limit minus 64 KiB; history is never silently dropped.
+- Text is stored and hashed as exact UTF-8 (NBSP, leading, trailing and blank lines kept). Unchanged text reuses its revision; changed text appends one. Review IDs are deterministic per account, source and revision, so a re-read rewrites no status, time or wording, Keep and Snooze decisions survive, and newly clean text never completes or verifies an outstanding provider action.
+- `GET /api/checks/<id>`, `GET /api/corpus?account_id=…&cursor=…&limit=…` (max 50) and `GET /api/corpus/sources/<id>/revisions` need the workspace token and refuse samples. `/api/state` carries at most 20 concise check summaries and counts, never corpus text.
+- Portable backup format 3 adds `reader_checks`, `reader_sources` and `reader_revisions` (formats 1 and 2 still import, with those keys absent and treated as empty; they are refused in a format 1 or 2 file). Import validates identifiers, hashes, receipt digests and cross-references before any write and is atomic and idempotent. The receipt seal is an integrity check only and is never treated as proof of meaning: Python re-validates every receipt row (status, reason, identity, coverage, counters, times) and checks that each receipt, source and revision names a present receipt that reports it, so a backup with recomputed hashes but impossible or orphaned history is refused. Reader versions 0.0.6 and 0.1.0 can be restored; only 0.1.0 can be saved. A restored receipt is historical evidence and does not authenticate the browser signed in today. Fields that later checks may have updated (author, channel, date) are compared only to the check that last saw the source. An import that adds reader history is refused, with nothing written, if the merged portable backup would exceed the same 32 MiB limit minus 64 KiB. An older app version refuses schema 6.

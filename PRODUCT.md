@@ -48,11 +48,16 @@ No credentials belong in project files, Git, backups, app responses or logs. Cle
 - Guided account setup, explicit access evidence and personal brand preferences.
 - An account tile map, recent Gmail/Outlook snapshots, and local saved reply drafts.
 - Responsive overview, account detail, review filtering and draft wording checks.
+- A local inbox for the user's own public comments addressed to RES (`RES: …`, `Hey RES, …`, `@RES …`). The external assistant verifies the account and imports them on request; Res stores the exact comment, link and dated assistant-reported identity evidence, plus an evaluation and optional proposed reply or edit. There is no background watching and no instant trigger, and a saved request is a local note: it grants no account access, runs nothing and publishes nothing. Edits, deletions and reply publication keep their own separate guarded workflows.
 - Backup import/export in Resonance's own format and a readable brief export.
 - Empty-state onboarding usable by any person.
 - Offline shell without caching private API responses.
 
 The local draft checks are deterministic English-language writing heuristics. They do not interpret full context, verify claims or substitute for a model-assisted review. An external daily assistant collects authorized evidence and handles separately authorized social actions; the local app displays the results. Local mail drafts are never sent automatically. Direct provider integrations and selected reply automation remain later work.
+
+## Reader checks (candidate)
+
+The candidate connects a separate browser reader to account setup and Check now. It can discover the current own X or YouTube account, ask the person to confirm its identity and boundaries, and read at most three recent own X posts or YouTube comments per account. A check saves an immutable receipt, exact text and revision history, and ordinary review evidence for local rule matches. Reader-store installation, signed desktop distribution and physical first-user proof remain release gates. Instagram, Substack and the other saved platforms retain paste and assistant routes. A receipt is the reader's report, not proof; no rule match is not an account-safety claim; nothing here changes a platform. Details: [SECURITY.md](SECURITY.md) and [docs/MONITORING.md](docs/MONITORING.md).
 
 ## Next product milestones
 

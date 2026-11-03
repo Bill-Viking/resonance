@@ -254,7 +254,7 @@ class EditAvailabilityTests(unittest.TestCase):
         upgraded = server.Store(self.directory)
         with upgraded.connect() as db:
             after = {t:[tuple(row) for row in db.execute('SELECT * FROM "'+t+'"')] for t in tables}
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 4)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], len(server.MIGRATIONS))
         self.assertEqual(after, before)
         snapshot = sorted((self.directory/'backups/auto').glob('*-before-v4.sqlite3'))[-1]
         with closing(sqlite3.connect(snapshot)) as db:

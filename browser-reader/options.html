@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Resonance Reader: site access</title>
+  <style>
+    body { max-width: 48rem; margin: 3rem auto; padding: 0 1rem; color: #1f2937; background: #f8fafc; font: 16px/1.5 system-ui, sans-serif; }
+    h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+    section { border: 1px solid #cbd5e1; border-radius: 8px; padding: 1rem 1.25rem; margin-top: 1rem; background: #fff; }
+    button { min-height: 44px; padding: 8px 16px; font: inherit; margin-right: .5rem; }
+    code { overflow-wrap: anywhere; }
+    li { margin-bottom: .35rem; }
+    .state { font-weight: 650; }
+    a { color: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <h1>Resonance Reader: site access</h1>
+  <p><strong>Preview, version 0.1.0. Read-only. Nothing is allowed until you press an Allow button on this page.</strong></p>
+  <p>Your browser words any site permission as access to read and change that whole site while you use this extension. That is how the browser describes it, and it is broader than what this reader does. The reader's own code is narrow:</p>
+  <ul>
+    <li>It runs only after your own click on <strong>Check now</strong> in Resonance on <code>http://127.0.0.1:4317/</code> on this computer.</li>
+    <li>It reads only your own recent X posts or your own YouTube comments, and only the text you wrote. Up to three items per account per check. Photos and video are not inspected.</li>
+    <li>It never posts, edits, deletes, likes, follows, types, switches accounts, or opens messages, notifications, search or settings.</li>
+    <li>On YouTube it opens and closes your account menu to confirm which channel is signed in, expands a comment's own "read more", and pauses a video that is playing on that comment's page. It writes nothing to the site.</li>
+    <li>It has no storage, makes no network requests of its own and has no automatic retry. Resonance, running on this computer, saves what was read after the check finishes.</li>
+  </ul>
+  <p><strong>YouTube checks</strong> open a separate visible browser window and take focus. Leave that window's tabs alone while it runs; opening, switching or closing tabs there stops the check. X checks stay in background tabs. The reader never closes any tab or window it opens.</p>
+  <p>These switches only give or remove the browser's permission. They do not sign you in anywhere. You can remove any permission here at any time; a check that starts without its permission stops with a plain "held" result and opens nothing.</p>
+
+  <section aria-labelledby="x-heading">
+    <h2 id="x-heading">X</h2>
+    <p>Needs only <code>https://x.com/*</code>.</p>
+    <p class="state" id="state-x" role="status">Checking…</p>
+    <button type="button" id="allow-x">Allow X</button>
+    <button type="button" id="remove-x">Remove X access</button>
+  </section>
+
+  <section aria-labelledby="yt-heading">
+    <h2 id="yt-heading">YouTube comments</h2>
+    <p>Needs only <code>https://www.youtube.com/*</code> and <code>https://myactivity.google.com/*</code>. The second is used for one page only: your YouTube comment history at <code>/page?page=youtube_comments</code>.</p>
+    <p class="state" id="state-youtube" role="status">Checking…</p>
+    <button type="button" id="allow-youtube">Allow YouTube</button>
+    <button type="button" id="remove-youtube">Remove YouTube access</button>
+  </section>
+
+  <p><a id="return-link" href="http://127.0.0.1:4317/">Return to Resonance</a></p>
+  <script src="options.js"></script>
+</body>
+</html>

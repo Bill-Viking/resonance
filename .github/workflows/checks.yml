@@ -24,4 +24,8 @@ jobs:
       - run: node tests/test_ui_actions.cjs
       - run: node tests/test_ui_communication.cjs
       - run: node tests/test_ui_today.cjs
+      - run: node tests/test_ui_reader.cjs
+      - run: node tests/test_browser_reader.cjs
+      - run: node tests/test_reader_discovery.cjs
+      - run: node tests/test_reader_pipeline.cjs
       - run: node --check static/app.js

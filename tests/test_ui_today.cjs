@@ -27,7 +27,15 @@ function fixture() {
   ];
   const attestation = {id:'att-verify',review_id:'r-verify',account_id:'x',source_key:'key-verify',evidence_fingerprint:'fp-verify',action:'edit',note:'Changed by me.',proposed_text:'Updated text',result_url:'',original_excerpt:'verify excerpt',source_url:'https://example.test/verify',created_at:'2026-09-15T11:00:00Z',done_at:'2026-09-15T11:00:00Z',execution_state:'needs_verification',blocker_reason:'',next_move:'none'};
   const messages = [0,1,2,3].map(index => ({id:`m${index}`,account_id:'mail',provider_id:`p${index}`,thread_id:`t${index}`,subject:index === 0 ? 'Hello <script>' : `Subject ${index}`,sender:index === 0 ? 'A & B' : `Sender ${index}`,received_at:`2026-09-${15-index}T08:00:00Z`,source_url:`https://mail.example.test/${index}`,preview:index === 0 ? 'Saved <img> preview' : `Saved preview ${index}`,is_read:index % 2 === 0,imported_at:`2026-09-${15-index}T09:00:00Z`}));
+  const inboxBase = {account_id:'x',kind:'reply',parent_url:'https://example.test/posts/p1',observed_at:'2026-09-14T10:00:00Z',last_seen_at:'2026-09-14T10:00:00Z',evidence:{checked_at:'2026-09-14T10:00:30Z',status:'signed_in',basis:'assistant_reported',visibility:'public'},revision:1,evaluation:'',proposal_kind:'',proposal:'',handled_note:'',receipt_url:'',receipt_note:'',history:[],published_by_resonance:false,grants_action_authority:false};
+  const request_inbox = [
+    {...inboxBase,id:'req-1',source_url:'https://example.test/comments/c1',text:'RES: tighten <img src=x onerror=alert(1)> & "this"',state:'needs_review',outcome:'Needs your review. Nothing has been run or published.',needs_attention:true},
+    {...inboxBase,id:'req-2',source_url:'javascript:alert(1)',parent_url:'',text:'Hey RES, check this',state:'prepared',evaluation:'Eval <b>bold</b>',proposal_kind:'reply',proposal:'Draft <script>x</script>',outcome:'Prepared locally. Nothing has been run or published.',needs_attention:false},
+    {...inboxBase,id:'req-3',source_url:'https://example.test/comments/c3',text:'@RES done one',state:'done',evaluation:'Evaluated',handled_note:'Handled <i>locally</i>',outcome:'Handled locally. Resonance published nothing.',needs_attention:false},
+    {...inboxBase,id:'req-4',source_url:'https://example.test/comments/c4',text:'RES: changed words',state:'needs_review',revision:2,history:[{revision:1}],outcome:'Needs your review. Nothing has been run or published.',needs_attention:true},
+  ];
   return {
+    request_inbox,
     settings:{display_name:'Example',theme:'dark'},accounts,reviews,policy_flags:[],
     source_items:[source('need','needs_you'),source('wait','waiting',{request_ids:['q-wait'],active_request_id:'q-wait'}),source('verify','verification_pending',{attestation_ids:['att-verify']}),source('unknown','verification_pending',{request_ids:['q-unknown'],active_request_id:'q-unknown'})],
     attestations:[attestation],action_requests:requests,activity:[],
@@ -53,7 +61,7 @@ function setup() {
   const source = fs.readFileSync(path.join(__dirname,'../static/app.js'),'utf8');
   const cutoff = source.indexOf("  document.addEventListener('click'");
   assert.ok(cutoff > 0);
-  vm.runInContext(source.slice(0,cutoff) + '\n globalThis.ui={state,renderNav,renderOverview,renderAccounts,renderSetup,renderDraft,todayReportContent,todayMail,todayAccountAttention,communicationSignature,sourceStateSignature,monitoringSignature,updateSourceView,updateCommunicationView,updateMonitoringView,refreshMonitoring,aboutDialog,handleAction};\n})();',context);
+  vm.runInContext(source.slice(0,cutoff) + '\n globalThis.ui={state,todayRequests,inboxCard,renderNav,renderOverview,renderAccounts,renderSetup,renderDraft,todayReportContent,todayMail,todayAccountAttention,communicationSignature,sourceStateSignature,monitoringSignature,updateSourceView,updateCommunicationView,updateMonitoringView,refreshMonitoring,aboutDialog,handleAction};\n})();',context);
   context.ui.state.data = structuredClone(data);
   context.ui.state.connected = true;
   context.ui.state.view = 'overview';
@@ -69,20 +77,23 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   const empty = setup();
   empty.ui.state.data = {settings:{theme:'dark'},accounts:[],reviews:[],source_items:[],action_requests:[],communication:{messages:[]},monitoring:{runs:[]}};
   const welcome = empty.ui.renderOverview();
-  const pitch = 'Resonance is a private notebook of what you have said online. Your own AI assistant does the reading and writes what it finds here — this page never touches your accounts.';
+  const pitch = 'Resonance is a private notebook of what you have said online. Paste your writing, try samples, or set up the separate browser reader. Your own assistant can also bring in posts for review.';
   assert.ok(welcome.includes(pitch));
-  for (const door of ['See it with sample posts','Check something I wrote','Bring in my accounts']) assert.ok(welcome.includes(door));
+  for (const door of ['Set up account checks','Paste my first post','Try samples']) assert.ok(welcome.includes(door));
   assert.ok(welcome.includes('data-action="your-data"'));
-  assert.ok(welcome.indexOf(pitch) < welcome.indexOf('See it with sample posts'));
+  assert.ok(welcome.indexOf(pitch) < welcome.indexOf('Set up account checks'));
   empty.ui.aboutDialog();
   assert.ok(empty.get('#dialog-content').innerHTML.includes(pitch));
   await empty.ui.handleAction({dataset:{action:'welcome-paste'}});
+  assert.ok(empty.get('#dialog-content').innerHTML.includes('Check wording without an account'),'Paste my first post starts the account flow and keeps the no-account route');
   assert.ok(empty.ui.renderDraft().includes('General writing check'),'the paste road works without an account');
 
   const t = setup();
   const today = t.ui.renderOverview();
   for (const hook of ['today-grid','today-main','today-side','terminal-panel','today-report','today-mail-row','today-access-row','today-summary']) assert.ok(today.includes(hook),`Today includes ${hook}`);
   for (const id of ['source-need','source-wait','source-verify','source-unknown']) assert.equal((today.match(new RegExp(`data-source-id="${id}"`,'g'))||[]).length,1,`${id} appears once on Today`);
+  assert.equal((today.match(/id="res-check-now"/g)||[]).length,1,'Today has exactly one fixed Check now button');
+  assert.ok(today.indexOf('id="res-check-now"') < today.indexOf('id="today-summary-content"'),'Check now leads Today');
   assert.ok(today.includes('Old partial report with explicit limits.'));
   assert.ok(today.includes('Sep 10, 2026'),'an old report keeps its actual date');
   assert.ok(today.includes('aria-label="Report date Sep 10, 2026'));
@@ -236,15 +247,74 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   assert.ok(deferred.get('#today-report-content').innerHTML.includes('New report after focus leaves.'));
   assert.equal(deferred.ui.state.refreshPending,false);
 
+  const inbox = t.ui.todayRequests();
+  assert.ok(inbox.includes('Resonance cannot watch for them'),'the inbox says assistant imports are required');
+  assert.ok(inbox.includes('Nothing here runs or publishes'));
+  assert.ok(inbox.includes('<span class="section-count">3</span>'),'only open requests are counted');
+  assert.ok(today.includes('id="today-requests-content"'),'Today holds the request inbox');
+  assert.equal((inbox.match(/class="inbox-card"/g)||[]).length,3,'done requests are not listed as open work');
+  assert.ok(inbox.includes('tighten &lt;img src=x onerror=alert(1)&gt; &amp; &quot;this&quot;'),'exact request text is escaped');
+  assert.ok(!inbox.includes('<img') && !inbox.includes('<script>') && !inbox.includes('<b>'),'saved request text never becomes markup');
+  assert.ok(inbox.includes('Eval &lt;b&gt;bold&lt;/b&gt;') && inbox.includes('Draft &lt;script&gt;x&lt;/script&gt;'));
+  assert.ok(inbox.includes('Proposed reply · not sent'));
+  assert.ok(inbox.includes('Open comment') && inbox.includes('href="https://example.test/comments/c1"') && inbox.includes('Open parent post'));
+  assert.ok(!inbox.includes('javascript:'),'a non-http source link is never rendered');
+  assert.ok(inbox.includes('The comment changed after an earlier request (1 earlier version kept)'));
+  assert.ok(inbox.includes('reported by your assistant') && inbox.includes('The platform did not confirm it'));
+  assert.ok(inbox.includes('Read '),'the observed age is shown');
+  assert.ok(inbox.includes('Mark prepared') && inbox.includes('Dismiss') && inbox.includes('Mark handled locally'));
+  assert.ok(!/data-action="(?:reply|publish|post|send|edit-comment|delete-comment)/.test(inbox) && !/<button\b[^>]*>\s*(?:Reply|Publish|Post|Send)\s*<\/button>/.test(inbox),'no provider action controls');
+  const doneCard = t.ui.inboxCard(t.ui.state.data.request_inbox[2]);
+  assert.ok(doneCard.includes('Handled &lt;i&gt;locally&lt;/i&gt;') && !doneCard.includes('data-action="inbox-update"'),'a done request has no controls');
+  assert.ok(doneCard.includes('Resonance published nothing'));
+  t.ui.state.data.request_inbox = [];
+  assert.ok(t.ui.todayRequests().includes('Ask your assistant to look for comments'));
+  delete t.ui.state.data.request_inbox;
+  assert.ok(t.ui.todayRequests().includes('No open RES requests saved'),'an older state without the inbox still renders');
+
+  const inboxActions = setup();
+  inboxActions.setHandler((url,options)=>url === '/api/state' ? response(inboxActions.data) : response({request:{}}));
+  await inboxActions.ui.handleAction({dataset:{action:'inbox-update',id:'req-1',state:'prepared'}});
+  const patch = inboxActions.calls.find(call=>call.method === 'PATCH');
+  assert.equal(patch.url,'/api/request-inbox/req-1');
+  assert.deepEqual(JSON.parse(patch.body),{state:'prepared',revision:1,evaluation:'Reviewed by you in Resonance. No assistant evaluation text was saved.'});
+  inboxActions.calls.length = 0;
+  await inboxActions.ui.handleAction({dataset:{action:'inbox-update',id:'req-2',state:'done'}});
+  const donePatch = JSON.parse(inboxActions.calls.find(call=>call.method === 'PATCH').body);
+  assert.deepEqual(Object.keys(donePatch).sort(),['handled_note','revision','state']);
+  assert.ok(donePatch.handled_note.includes('did not publish anything'));
+  inboxActions.calls.length = 0;
+  await inboxActions.ui.handleAction({dataset:{action:'inbox-update',id:'missing',state:'dismissed'}});
+  assert.equal(inboxActions.calls.length,0,'an unknown request sends nothing');
+  const practice = setup();
+  practice.ui.state.data.workspace = {mode:'samples',token:'a'.repeat(32)};
+  assert.ok(!practice.ui.todayRequests().includes('data-action="inbox-update"'),'practice samples offer no inbox controls');
+  await practice.ui.handleAction({dataset:{action:'inbox-update',id:'req-1',state:'dismissed'}});
+  assert.equal(practice.calls.length,0);
+
+  const inboxRefresh = setup();
+  inboxRefresh.get('#today-requests-content').innerHTML = 'old requests';
+  const changedInbox = structuredClone(inboxRefresh.data);
+  changedInbox.request_inbox.push({...changedInbox.request_inbox[0],id:'req-new',source_url:'https://example.test/comments/new',text:'RES: a newly imported request'});
+  inboxRefresh.setHandler(()=>response(changedInbox));
+  await inboxRefresh.ui.refreshMonitoring();
+  assert.ok(inboxRefresh.get('#today-requests-content').innerHTML.includes('a newly imported request'),'a new import refreshes the Today inbox');
+
   const workerEvents={},removed=[];
   let activation;
   const workerContext={self:{addEventListener(name,handler){workerEvents[name]=handler;},clients:{claim:async()=>{}}},
-    caches:{keys:async()=>['social-brief-shell-v12','resonance-shell-v15','resonance-shell-v16','resonance-shell-v18','resonance-shell-v19','resonance-shell-v20','resonance-shell-v21','resonance-shell-v22','unrelated-cache'],
+    caches:{keys:async()=>['social-brief-shell-v12','resonance-shell-v15','resonance-shell-v16','resonance-shell-v18','resonance-shell-v19','resonance-shell-v20','resonance-shell-v21','resonance-shell-v22','resonance-shell-v23','resonance-shell-v25','unrelated-cache'],
       delete:async key=>{removed.push(key);return true;}}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../static/sw.js'),'utf8'),workerContext);
   workerEvents.activate({waitUntil(promise){activation=promise;}});
   await activation;
-  assert.deepEqual(removed.sort(),['resonance-shell-v15','resonance-shell-v16','resonance-shell-v18','resonance-shell-v19','resonance-shell-v20','resonance-shell-v21','social-brief-shell-v12']);
+  assert.deepEqual(removed.sort(),['resonance-shell-v15','resonance-shell-v16','resonance-shell-v18','resonance-shell-v19','resonance-shell-v20','resonance-shell-v21','resonance-shell-v22','resonance-shell-v23','social-brief-shell-v12']);
+  assert.ok(fs.readFileSync(path.join(__dirname,'../static/sw.js'),'utf8').includes("'resonance-shell-v25'"),'the shell cache version was bumped for the account finder');
+  assert.ok(fs.readFileSync(path.join(__dirname,'../static/sw.js'),'utf8').includes("'/reader-client.js', '/account-discovery.js', '/app.js'"),'the shell cache lists the reader client and account finder before the app');
+  const shell=fs.readFileSync(path.join(__dirname,'../static/index.html'),'utf8');
+  assert.ok(shell.indexOf('/reader-client.js') > 0 && shell.indexOf('/reader-client.js') < shell.indexOf('/app.js'),'the reader client loads before the app');
+  assert.ok(shell.indexOf('/account-discovery.js') > 0 && shell.indexOf('/account-discovery.js') < shell.indexOf('/app.js'),'the account finder loads before the app');
+  assert.ok(!/https?:\/\/(?!127\.0\.0\.1)/.test(shell.replace(/<meta[^>]*>/g,'')),'the shell loads no external resource');
 
   console.log('B2 Today/Accounts renderer and refresh checks passed (no browser or visual claim).');
 })().catch(error=>{console.error(error);process.exitCode=1;});

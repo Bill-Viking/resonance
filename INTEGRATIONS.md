@@ -13,3 +13,8 @@ Checked against primary documentation on 2026-09-13. These are development const
 | Reddit | Reddit's public content policy distinguishes licensed use and unauthorized bulk access. [Reddit public content policy](https://support.reddithelp.com/hc/en-us/articles/26410290525844-Public-Content-Policy) | Obtain an approved access route for this general-use product; do not build a commercial promise around an unapproved scraper. |
 
 No fees, permissions, platform changes or registrations have been accepted. Recheck these documents when implementation begins because availability and access rules change.
+
+
+## Reader-check intake (candidate)
+
+The local app accepts reader results through `POST /api/checks/begin`, `/api/checks/cancel` and `/api/checks`, bound to a server-issued ID and account snapshot. Only reader version 0.1.0, live-mode X and YouTube results are accepted; Facebook and every other platform are recorded as `unsupported` (`provider_not_supported`). The result shape is the extension's validated `RESULT` (`type`, `requestId`, `provider`, `mode`, `status`, `tabs`, `items`, `coverage`, `identity`) with `provider` `x` or `youtube`; the saved platform spelling stays `X` or `YouTube`. The reader supplies observations only: Resonance evaluates `policy.check` itself and treats nothing as authority. The candidate includes the trusted-click bridge and Today/account controls. Reader-store installation and native first-user proof remain pending. The protocol is documented in [browser-reader/README.md](browser-reader/README.md).
