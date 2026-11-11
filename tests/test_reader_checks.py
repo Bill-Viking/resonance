@@ -1019,16 +1019,19 @@ class HttpTests(Rig):
         self.port = self.app.server_address[1]
 
     def call(self, method, path, body=None, origin=True, token=True):
-        connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=3)
         headers = {'Content-Type': 'application/json'}
         if token:
             headers['X-Resonance-Workspace'] = self.app.store.context()['token']
         if origin and method != 'GET':
             headers['Origin'] = f'http://127.0.0.1:{self.port}'
-        connection.request(method, path, None if body is None else json.dumps(body).encode(), headers)
-        response = connection.getresponse()
-        result = json.loads(response.read())
-        connection.close()
+        # Sample initialization performs real SQLite/fsync work on CI hosts.
+        connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=30)
+        try:
+            connection.request(method, path, None if body is None else json.dumps(body).encode(), headers)
+            response = connection.getresponse()
+            result = json.loads(response.read())
+        finally:
+            connection.close()
         return response.status, result
 
     def test_routes_enforce_same_origin_workspace_and_end_to_end_flow(self):
