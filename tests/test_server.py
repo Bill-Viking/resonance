@@ -15,6 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server
 
 
+# Sample initialization does real SQLite/fsync work, which is slow on Windows runners.
+HTTP_RESPONSE_BUDGET_SECONDS = 30
+
+
 class StartupTests(unittest.TestCase):
     def test_loopback_startup_never_resolves_a_hostname(self):
         with tempfile.TemporaryDirectory() as directory, \
@@ -44,17 +48,19 @@ class LocalAPITest(unittest.TestCase):
         self.temp.cleanup()
 
     def request(self, method, path, body=None, headers=None, raw=False):
-        connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=3)
         data = body if raw else json.dumps(body).encode() if body is not None else None
         h = {'Content-Type': 'application/json', 'Origin': self.origin,
              'X-Resonance-Workspace': self.app.store.context()['token']}
         if headers:
             h.update(headers)
-        connection.request(method, path, data, h)
-        response = connection.getresponse()
-        content = response.read()
-        status, response_headers = response.status, dict(response.getheaders())
-        connection.close()
+        connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=HTTP_RESPONSE_BUDGET_SECONDS)
+        try:
+            connection.request(method, path, data, h)
+            response = connection.getresponse()
+            content = response.read()
+            status, response_headers = response.status, dict(response.getheaders())
+        finally:
+            connection.close()
         return status, json.loads(content) if 'application/json' in response_headers.get('Content-Type', '') else content.decode(), response_headers
 
     def account(self, **extra):
@@ -144,12 +150,14 @@ class LocalAPITest(unittest.TestCase):
         for origin in ['https://evil.example', 'null', 'http://localhost:1', self.origin + '.evil.example']:
             self.assertEqual(self.request('PATCH', '/api/settings', {'theme': 'light'}, {'Origin': origin})[0], 403)
         self.assertEqual(self.request('PATCH', '/api/settings', {'theme': 'light'}, {'Sec-Fetch-Site': 'cross-site'})[0], 403)
-        connection = http.client.HTTPConnection('127.0.0.1', self.port)
-        connection.request('PATCH', '/api/settings', '{}', {'Content-Type': 'application/json'})
-        response = connection.getresponse()
-        self.assertEqual(response.status, 403)
-        response.read()
-        connection.close()
+        connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=HTTP_RESPONSE_BUDGET_SECONDS)
+        try:
+            connection.request('PATCH', '/api/settings', '{}', {'Content-Type': 'application/json'})
+            response = connection.getresponse()
+            self.assertEqual(response.status, 403)
+            response.read()
+        finally:
+            connection.close()
         self.assertEqual(self.request('GET', '/api/state')[1]['settings']['theme'], 'dark')
 
     def test_body_security(self):
