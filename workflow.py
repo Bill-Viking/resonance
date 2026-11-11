@@ -66,6 +66,11 @@ def precise_source(value, platform="", kind="post"):
     if platform == "youtube" and host in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}:
         if host == "youtu.be":
             return kind == "post" and bool(re.fullmatch(r"/[^/]+", path))
+        if re.fullmatch(r"/post/[A-Za-z0-9_-]+/?", part.path):
+            # A community post identifies a comment or reply only through exactly one nonblank lc;
+            # the parent post alone is never an exact source for any kind.
+            lc = [value for key, value in parse_qsl(part.query, keep_blank_values=True) if key == "lc"]
+            return kind in {"comment", "reply"} and len(lc) == 1 and bool(lc[0].strip())
         return path == "/watch" and bool(query.get("v")) and ((kind == "post" and not query.get("lc")) or
                                                                  (kind in {"comment", "reply"} and bool(query.get("lc"))))
     if platform == "reddit" and (host == "reddit.com" or host.endswith(".reddit.com")):

@@ -311,7 +311,11 @@
   }
   function todaySummary() {
     const buckets = todaySourceBuckets();
-    return `<section class="today-summary terminal-panel" aria-label="Today at a glance"><button data-action="review-filter" data-status="needs_you"><span>Needs you</span><strong>${buckets.needs_you.length}</strong></button><button data-action="review-filter" data-status="waiting"><span>Waiting</span><strong>${buckets.waiting.length}</strong></button><button data-action="review-filter" data-status="verification_pending"><span>Verification</span><strong>${buckets.verification_pending.length}</strong></button><button data-action="navigate" data-view="mail"><span>Saved mail</span><strong>${communicationList('messages').length}</strong></button></section>`;
+    return `<section class="today-summary terminal-panel" aria-label="Today at a glance"><button data-action="review-filter" data-status="needs_you"><span>Needs you</span><strong>${buckets.needs_you.length}</strong></button><button data-action="review-filter" data-status="waiting"><span>Waiting</span><strong>${buckets.waiting.length}</strong></button><button data-action="review-filter" data-status="verification_pending"><span>Verification</span><strong>${buckets.verification_pending.length}</strong></button><button data-action="navigate" data-view="mail"><span>Saved mail</span><strong>${communicationList('messages').length}</strong></button></section>${todayKept()}`;
+  }
+  function todayKept() {
+    const kept = sourceItems().filter(item => item.status === 'kept').length;
+    return `<p class="today-kept"><span><strong>${kept}</strong> kept ${kept === 1 ? 'post' : 'posts'}. Your choices are saved here; nothing on the platform changed.</span><button class="text-button" data-action="review-filter" data-status="history">View saved posts ${icon('arrow')}</button></p>`;
   }
   function todayReportContent() {
     const run = monitorRuns()[0];
@@ -395,7 +399,7 @@
     return top + readerTodaySection() + todayReport() + `<div id="today-summary-content">${todaySummary()}</div><div class="today-grid"><div class="today-main"><section class="terminal-panel" id="today-needs-you"><div id="today-needs-you-content">${todayNeedsYou()}</div></section><section class="terminal-panel" id="today-requests"><div id="today-requests-content">${todayRequests()}</div></section></div><aside class="today-side"><section class="terminal-panel" id="today-waiting"><div id="today-waiting-content">${todayWaiting()}</div></section><section class="terminal-panel" id="today-mail"><div class="section-heading"><div><h2>Saved mail <button class="section-count count-button" data-action="navigate" data-view="mail" aria-label="Open saved mail" id="today-mail-count">${communicationList('messages').length}</button></h2><p>Local previews and reply drafts.</p></div><button class="text-button" data-action="navigate" data-view="mail">Open Mail ${icon('arrow')}</button></div><div id="today-mail-content">${todayMail()}</div></section><section class="terminal-panel" id="today-accounts"><div class="section-heading"><div><h2>Account attention</h2><p>Saved access or boundary setup that needs a look.</p></div><button class="text-button" data-action="navigate" data-view="accounts">Open Accounts ${icon('arrow')}</button></div><div id="today-accounts-content">${todayAccountAttention()}</div></section></aside></div>`;
   }
   function renderWelcome() {
-    return `<section class="welcome-panel panel"><div class="welcome-intro"><div class="eyebrow">WELCOME</div><h1>Resonance</h1><p class="welcome-pitch">${esc(WELCOME_PITCH)}</p></div><div class="welcome-doors"><button class="welcome-door" data-action="reader-setup"><span class="step-number">01</span><span><strong>Set up account checks</strong><small>Read your newest X and YouTube text in this browser. Preview.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="welcome-paste"><span class="step-number">02</span><span><strong>Paste my first post</strong><small>Save an account, then check something you wrote.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="start-samples"><span class="step-number">03</span><span><strong>Try samples</strong><small>Ten seconds, nothing to set up.</small></span>${icon('arrow')}</button></div><button class="welcome-privacy text-button" data-action="your-data">Everything stays in a folder on this computer. No account, no cloud, no tracking. ${icon('arrow')}</button></section>`;
+    return `<section class="welcome-panel panel"><div class="welcome-intro"><div class="eyebrow">WELCOME</div><h1>Resonance</h1><p class="welcome-pitch">${esc(WELCOME_PITCH)}</p></div><div class="welcome-doors"><button class="welcome-door" data-action="reader-setup"><span class="step-number">01</span><span><strong>Set up account checks</strong><small>Read your newest X and YouTube text in this browser. Preview.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="welcome-paste"><span class="step-number">02</span><span><strong>Paste my first post</strong><small>Paste your writing, then choose its account.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="start-samples"><span class="step-number">03</span><span><strong>Try samples</strong><small>Ten seconds, nothing to set up.</small></span>${icon('arrow')}</button></div><button class="welcome-privacy text-button" data-action="your-data">Everything stays in a folder on this computer. No account, no cloud, no tracking. ${icon('arrow')}</button></section>`;
   }
   function requestOverview() {
     const requests = actionRequests();
@@ -803,9 +807,20 @@
   function sourceRepresentative(item) {
     return reviewById(item?.review_id) || (item?.review_ids || []).map(reviewById).find(Boolean) || null;
   }
+  // Presentation only: a local review's generated summary only restates its rule flags, so it is not a second concern
+  // when those flags are shown. Manual, assistant, mixed-provenance and unmatched findings are never hidden.
+  function restatesShownFlags(finding, all) {
+    if (finding?.provenance !== 'local:review' || (finding.flag_ids || []).length || !String(finding.detail || '').startsWith('Local checks matched:')) return false;
+    const reviewIds = Array.isArray(finding.review_ids) ? finding.review_ids : [];
+    return reviewIds.length > 0 && reviewIds.every(id => all.some(other => other !== finding && (other.flag_ids || []).length && (other.review_ids || []).includes(id)));
+  }
+  function shownFindings(item) {
+    const all = Array.isArray(item?.findings) ? item.findings : [];
+    return all.filter(finding => !restatesShownFlags(finding,all));
+  }
   function highlightRanges(item) {
     const text = String(item?.excerpt ?? '');
-    const findings = Array.isArray(item?.findings) ? item.findings : [];
+    const findings = shownFindings(item);
     const found = [];
     findings.forEach((finding,index) => {
       for (const quote of Array.isArray(finding?.quotes) ? finding.quotes : []) {
@@ -928,7 +943,7 @@
   }
   function sourceCard(item, compact = false) {
     const account = accountById(item.account_id);
-    const findings = Array.isArray(item.findings) ? item.findings : [];
+    const findings = shownFindings(item);
     const visibleFindings = compact ? findings.slice(0,2) : findings;
     const request = activeRequestForSource(item);
     const attestation = sourceItemAttestations(item).find(record => ['needs_verification','blocked'].includes(record.execution_state));
@@ -1112,7 +1127,12 @@
     const readable = state.data.accounts.filter(readerProvider).length;
     const disabled = !readerCanCheck() || readerBusy();
     const intro = readable ? 'Reads the newest posts and replies you wrote on X, and your newest comments on YouTube, in this browser. Nothing is saved until the whole check finishes.' : 'None of your saved accounts is on X or YouTube yet, so there is nothing to read automatically. Pasting text and your own assistant still work.';
-    return `<div class="section-heading"><div><h2>Check now</h2><p>${esc(intro)}</p></div></div><div class="reader-controls"><button id="res-check-now" class="button primary" data-action="reader-check-all" ${disabled ? 'disabled' : ''}>${icon('search')}Check now</button><button class="button quiet" data-action="reader-setup">Set up account checks</button><button class="button quiet" data-action="add-excerpt">Paste text</button><button class="button quiet" data-action="connect-assistant">Ask my assistant</button></div>${readerStateLine()}${readerCheckProgress(readerDialogKind !== 'check')}${readerLatestHtml()}`;
+    const notReady = !showingSamples() && ['absent','unavailable','version','blocked'].includes(readerSetupState().key);
+    const checkNow = `<button id="res-check-now" class="button ${notReady ? 'quiet' : 'primary'}" data-action="reader-check-all" ${disabled || notReady ? 'disabled' : ''}>${icon('search')}Check now</button>`;
+    const setupButton = '<button class="button quiet" data-action="reader-setup">Set up account checks</button>';
+    const pasteButton = `<button class="button ${notReady ? 'primary' : 'quiet'}" data-action="add-excerpt">Paste text</button>`;
+    const doors = notReady ? `${pasteButton}${checkNow}${setupButton}` : `${checkNow}${setupButton}${pasteButton}`;
+    return `<div class="section-heading"><div><h2>Check now</h2><p>${esc(notReady ? 'Account checks are not set up in this browser, so paste text you wrote to check it now. Nothing is read automatically.' : intro)}</p></div></div><div class="reader-controls">${doors}<button class="button quiet" data-action="connect-assistant">Ask my assistant</button></div>${readerStateLine()}${readerCheckProgress(readerDialogKind !== 'check')}${readerLatestHtml()}`;
   }
   const readerTodaySection = () => `<section class="terminal-panel reader-today" id="reader-today" aria-label="Check now"><div id="reader-today-content">${readerTodayContent()}</div></section>`;
 
@@ -1465,6 +1485,7 @@
     else $('[data-action="close-dialog"]',dialog)?.focus({preventScroll:true});
   }
   function closeDialog() {
+    cancelFirstPost();
     dialog.close();
     if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({preventScroll:true});
   }
@@ -1523,7 +1544,10 @@
     return {handle,url:route ? `https://${route[0]}/${route[1]}${encodeURIComponent(handle)}` : ''};
   }
   function startAccountWalk(platform = '',route = '') {
-    accountWalk = {route,step:platforms.includes(platform) ? 'identity' : 'platform',platform,handle:'',url:'',input:'',identity_mode:'named',daring:'careful',sfw_only:true,saved:null};
+    const first = route === 'first-post';
+    accountWalk = {route,step:first ? 'post' : platforms.includes(platform) ? 'identity' : 'platform',platform:first ? '' : platform,handle:'',url:'',input:'',identity_mode:'named',daring:'careful',sfw_only:true,saved:null,
+      // The first-post draft lives only in this object (never storage) until it is saved or cancelled.
+      ...(first ? {text:'',kind:'post',title:'',source_url:'',reviewId:null,flagCount:null,uncertain:'',attempt:null,cancelled:false,samples:showingSamples(),token:state.data?.workspace?.token || ''} : {})};
     accountWalkDialog();
   }
   function accountWalkDialog() {
@@ -1531,7 +1555,26 @@
     const walk = accountWalk;
     const progress = `<div class="walk-progress" aria-label="Saved accounts">${state.data.accounts.length ? state.data.accounts.map(account => `<span>${platformIcon(account)}${esc(handleOf(account))}</span>`).join('') : '<span>No accounts saved yet</span>'}</div>`;
     let body, footer, form = '';
-    if (walk.step === 'platform') {
+    const first = walk.route === 'first-post';
+    if (first && walk.attempt) {
+      // Once an attempt starts the walk only recovers: the frozen post and account choices are shown read-only.
+      const {account,excerpt} = walk.attempt;
+      const refreshOnly = !!(walk.uncertain || walk.excerptSaved);
+      const status = walk.posting ? 'Saving on this computer…'
+        : walk.uncertain ? 'This attempt cannot be confirmed. Refresh saved records, then inspect Accounts and Posts before starting again. Nothing will be sent again from here.'
+        : walk.excerptSaved ? 'Your post was saved and checked. The workspace could not refresh yet.'
+        : walk.saved ? 'Your account is saved. Your post is not saved yet.'
+        : 'Nothing is confirmed as saved yet.';
+      form = 'walk-boundaries-form';
+      body = `<div class="identity-reading"><strong>${esc(account.platform)} · ${esc(account.handle)}</strong><p>${account.url ? esc(account.url) : 'A handle only; no public profile link was inferred.'}</p><p class="field-help">${account.identity_mode === 'alias' ? 'An alias' : 'My real name'} · ${esc(daringLabel[account.daring] || account.daring)} · ${account.sfw_only ? 'Safe for work' : 'Not limited to safe for work'}</p></div><div class="detail-label">YOUR POST</div><blockquote class="review-excerpt walk-post-preview" id="walk-frozen-post">${esc(excerpt.text)}</blockquote><p class="field-help">${esc(status)}</p><p class="field-help">This post and these choices are fixed for this attempt. To change them, close this window and use Accounts. Closing does not undo anything: saves already sent may still complete, so refresh saved records before trying again.</p>`;
+      footer = `<button type="button" class="button quiet" data-action="close-dialog">Cancel</button><button type="submit" class="button primary" ${walk.posting ? 'disabled aria-busy="true"' : ''}>${walk.posting ? 'Saving…' : refreshOnly ? 'Refresh saved records' : 'Continue check'}</button>`;
+    } else if (walk.step === 'post') {
+      form = 'walk-post-form';
+      const socialPlatforms = platforms.filter(platform => !['Gmail','Outlook'].includes(platform));
+      body = `<p>Paste your writing, then choose which account it belongs to. Private messages stay out.</p><button type="button" class="text-button" data-action="draft-no-account">Check wording without an account</button><div class="form-grid"><div class="field full"><label for="walk-post-text">Your post</label><textarea id="walk-post-text" name="text" class="walk-post-text" rows="9" maxlength="20000" placeholder="Paste a post, comment, or reply you wrote.">
+${esc(walk.text)}</textarea></div><div class="field"><label for="walk-post-platform">Platform</label><select id="walk-post-platform" name="platform"><option value="">Choose a platform</option>${socialPlatforms.map(platform => `<option value="${esc(platform)}" ${walk.platform === platform ? 'selected' : ''}>${esc(platform)}</option>`).join('')}</select></div><div class="field"><label for="walk-identity">Your profile link or handle</label><input id="walk-identity" name="identity" maxlength="2048" placeholder="@river_example" value="${esc(walk.input)}" autocomplete="off"><p class="field-help">This identifies the account. Your post goes in the box above.</p></div></div><details class="form-details" ${walk.kind !== 'post' || walk.title || walk.source_url ? 'open' : ''}><summary>Optional details</summary><div class="form-grid"><div class="field"><label for="walk-post-kind">Type of activity</label><select id="walk-post-kind" name="kind">${[['post','Post'],['comment','Comment'],['reply','Reply']].map(([value,label]) => `<option value="${value}" ${walk.kind === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div class="field"><label for="walk-post-title">Label <span>optional</span></label><input id="walk-post-title" name="title" maxlength="240" placeholder="Something you will recognize" value="${esc(walk.title)}"></div><div class="field full"><label for="walk-post-url">Link to the original <span>optional</span></label><input id="walk-post-url" name="source_url" type="url" maxlength="2048" placeholder="https://…" value="${esc(walk.source_url)}"></div></div></details>`;
+      footer = '<button type="button" class="button quiet" data-action="close-dialog">Cancel</button><button type="submit" class="button primary">Next</button>';
+    } else if (walk.step === 'platform') {
       body = `<p>Pick the platform for this account.</p><div class="platform-picker">${platforms.map(platform => `<button type="button" data-action="walk-platform" data-platform="${esc(platform)}">${platformIcon({platform})}<strong>${esc(platform)}</strong></button>`).join('')}</div>`;
       footer = `<button type="button" class="button quiet" data-action="close-dialog">Cancel</button>${walk.route === 'first-post' ? '<button type="button" class="button quiet" data-action="draft-no-account">Check wording without an account</button>' : ''}`;
     } else if (walk.step === 'identity') {
@@ -1541,8 +1584,8 @@
       footer = '<button type="button" class="button quiet" data-action="walk-back" data-step="platform">Back</button><button type="submit" class="button primary">Next</button>';
     } else if (walk.step === 'boundaries') {
       form = 'walk-boundaries-form';
-      body = `<div class="identity-reading"><strong>${esc(walk.platform)} · ${esc(walk.handle)}</strong><p>${walk.url ? esc(walk.url) : 'A handle only; no public profile link was inferred.'}</p>${walk.discovered ? '<p class="field-help">The browser reader saw this account signed in on this computer. It is saved exactly as shown, and only if you choose Save account. Real name, careful and safe for work are chosen for you; change them if they are not right.</p>' : '<button type="button" class="text-button" data-action="walk-back" data-step="identity">Change this</button>'}</div><div class="field"><label for="identity-mode">Is this under your real name or an alias?</label><select id="identity-mode" name="identity_mode"><option value="named" ${walk.identity_mode === 'named' ? 'selected' : ''}>My real name</option><option value="alias" ${walk.identity_mode === 'alias' ? 'selected' : ''}>An alias</option></select><p class="field-help">Accounts under your real name always stay safe for work; an alias is not a promise of anonymity.</p></div><div class="field"><label for="walk-daring">How daring may this account be?</label><select id="walk-daring" name="daring">${Object.entries(daringLabel).map(([value,label]) => `<option value="${value}" ${walk.daring === value ? 'selected' : ''}>${label}</option>`).join('')}</select><p class="field-help">Daring changes how much edge you want in your wording; it never overrides safe-for-work boundaries.</p></div><div class="field check-field"><label><input id="sfw-only" name="sfw_only" type="checkbox" ${walk.sfw_only ? 'checked' : ''} ${walk.identity_mode !== 'alias' ? 'disabled' : ''}>Keep this account safe for work</label><p class="field-help" id="identity-help">${walk.identity_mode === 'alias' ? 'An alias does not guarantee anonymity. Turning this off relaxes content checks for this account.' : 'Real-name accounts always require safe-for-work wording.'}</p></div>`;
-      footer = `${walk.discovered ? '<button type="button" class="button quiet" data-action="close-dialog">Cancel</button>' : '<button type="button" class="button quiet" data-action="walk-back" data-step="identity">Back</button>'}<button type="submit" class="button primary">Save account</button>`;
+      body = `<div class="identity-reading"><strong>${esc(walk.platform)} · ${esc(walk.handle)}</strong><p>${walk.url ? esc(walk.url) : 'A handle only; no public profile link was inferred.'}</p>${walk.discovered ? '<p class="field-help">The browser reader saw this account signed in on this computer. It is saved exactly as shown, and only if you choose Save account. Real name, careful and safe for work are chosen for you; change them if they are not right.</p>' : `<button type="button" class="text-button" data-action="walk-back" data-step="${first ? 'post' : 'identity'}">Change this</button>`}</div>${first ? `<div class="detail-label">YOUR POST</div><blockquote class="review-excerpt walk-post-preview">${esc(trimText(walk.text,280))}</blockquote><p class="field-help">Save & check post saves this account and your post on this computer, then checks the post against the choices below. Nothing is posted or changed on the platform.</p>` : ''}<div class="field"><label for="identity-mode">Is this under your real name or an alias?</label><select id="identity-mode" name="identity_mode"><option value="named" ${walk.identity_mode === 'named' ? 'selected' : ''}>My real name</option><option value="alias" ${walk.identity_mode === 'alias' ? 'selected' : ''}>An alias</option></select><p class="field-help">Accounts under your real name always stay safe for work; an alias is not a promise of anonymity.</p></div><div class="field"><label for="walk-daring">How daring may this account be?</label><select id="walk-daring" name="daring">${Object.entries(daringLabel).map(([value,label]) => `<option value="${value}" ${walk.daring === value ? 'selected' : ''}>${label}</option>`).join('')}</select><p class="field-help">Daring changes how much edge you want in your wording; it never overrides safe-for-work boundaries.</p></div><div class="field check-field"><label><input id="sfw-only" name="sfw_only" type="checkbox" ${walk.sfw_only ? 'checked' : ''} ${walk.identity_mode !== 'alias' ? 'disabled' : ''}>Keep this account safe for work</label><p class="field-help" id="identity-help">${walk.identity_mode === 'alias' ? 'An alias does not guarantee anonymity. Turning this off relaxes content checks for this account.' : 'Real-name accounts always require safe-for-work wording.'}</p></div>`;
+      footer = `${walk.discovered ? '<button type="button" class="button quiet" data-action="close-dialog">Cancel</button>' : `<button type="button" class="button quiet" data-action="walk-back" data-step="${first ? 'post' : 'identity'}">Back</button>`}<button type="submit" class="button primary">${first ? 'Save & check post' : 'Save account'}</button>`;
     } else {
       const signIn = safeUrl(signInUrls[walk.platform]);
       body = walk.discovered
@@ -1550,8 +1593,93 @@
         : `<p class="walk-saved">${icon('check')} ${esc(walk.handle)} is saved.</p><p>Resonance never sees your password; signing in in your browser lets your assistant read this account.</p><a class="button primary" href="${esc(signIn)}" target="_blank" rel="noopener noreferrer">Sign in to ${esc(walk.platform)} in your browser ${icon('external')}</a><p class="field-help">Saving this account does not verify a sign-in or read any posts.</p>${readerProvider({platform:walk.platform}) ? `<button type="button" class="button quiet" data-action="reader-account-dialog" data-id="${esc(walk.saved)}">Check this account now</button>` : ''}`;
       footer = '<button type="button" class="button quiet" data-action="add-account">Add another</button><button type="button" class="button primary" data-action="account-walk-done">Done</button>';
     }
+    if (first) {
+      openDialog(dialogShell(walk.step === 'post' ? 'Paste my first post' : 'Review your first post',`Step ${walk.step === 'post' ? 1 : 2} of 2${walk.step === 'post' ? '' : ' · ' + walk.platform}`,body,footer,form));
+      return;
+    }
     const step = {platform:1,identity:2,boundaries:3,signin:4}[walk.step];
     openDialog(dialogShell('Bring in my accounts',`Step ${step} of 4${walk.platform ? ' · ' + walk.platform : ''}`,progress+body,footer,form));
+  }
+  // First post: on the first final submit the account and excerpt payloads are frozen. Every continuation sends only
+  // those copies, ids are kept before every refresh, and a POST whose response was lost stays uncertain in this walk.
+  const firstPostStale = walk => accountWalk !== walk || walk.cancelled || showingSamples() !== walk.samples || (state.data?.workspace?.token || '') !== walk.token;
+  function freezeFirstPost(walk) {
+    walk.attempt = Object.freeze({
+      account:Object.freeze({platform:String(walk.platform),handle:String(walk.handle),url:String(walk.url),display_name:'',identity_mode:String(walk.identity_mode),daring:String(walk.daring),sfw_only:walk.sfw_only === true}),
+      excerpt:Object.freeze({kind:String(walk.kind),text:String(walk.text),source_url:String(walk.source_url),title:String(walk.title)})});
+  }
+  async function saveFirstPost(walk) {
+    if (walk.posting || firstPostStale(walk)) return;
+    if (!walk.attempt) freezeFirstPost(walk);
+    const stale = () => firstPostStale(walk);
+    const {account,excerpt} = walk.attempt;
+    const lostAccount = 'Resonance could not confirm whether the account was saved. Nothing was sent again. Choose Refresh saved records, then inspect Accounts and Posts before starting again.';
+    walk.posting = true;
+    accountWalkDialog();
+    try {
+      if (walk.uncertain) {await refreshFirstPost(walk,stale);return;}
+      if (!walk.saved) {
+        let result;
+        try {result = await api('/api/accounts','POST',account);}
+        catch (error) {
+          if (error.status === undefined) {walk.uncertain = 'account';throw new Error(lostAccount);}
+          throw error;
+        }
+        if (stale()) return;
+        if (typeof result?.account?.id !== 'string' || !result.account.id.trim()) {walk.uncertain = 'account';throw new Error(lostAccount);}
+        walk.saved = result.account.id;
+      }
+      if (!walk.excerptSaved) {
+        if (!await reload()) throw new Error('The account was saved. Choose Continue check to refresh before your post is saved.');
+        if (stale()) return;
+        let result;
+        try {result = await api('/api/excerpts','POST',{account_id:walk.saved,...excerpt});}
+        catch (error) {
+          if (error.status === undefined) {walk.uncertain = 'excerpt';throw new Error('Resonance could not confirm whether your post was saved. Nothing was sent again, and your text is still here. Choose Refresh saved records, then inspect Accounts and Posts before starting again.');}
+          throw error;
+        }
+        if (stale()) return;
+        if (typeof result?.review?.id !== 'string' || !result.review.id.trim()) {
+          walk.uncertain = 'excerpt';
+          throw new Error('Resonance could not confirm whether your post was saved. Your text is still here. Choose Refresh saved records, then inspect Posts before starting again. Nothing will be sent again from here.');
+        }
+        walk.excerptSaved = true;
+        walk.reviewId = result.review.id;
+        walk.flagCount = Number.isInteger(result.flag_count) && result.flag_count >= 0 ? result.flag_count : null;
+      }
+      if (!await reload()) throw new Error('The post was saved and checked, but the workspace could not refresh. Choose Refresh saved records; nothing will be saved twice.');
+      if (stale()) return;
+      finishFirstPost(walk);
+    } catch (error) {
+      if (stale()) return;
+      throw error;
+    } finally {
+      walk.posting = false;
+      if (accountWalk === walk && !walk.cancelled) accountWalkDialog();
+    }
+  }
+  // Refreshing may show saved records, but it never clears uncertainty, picks an id, sends again or finishes the walk.
+  async function refreshFirstPost(walk,stale) {
+    if (!await reload()) throw new Error('Resonance still cannot refresh saved records. Nothing was sent again.');
+    if (stale()) return;
+    throw new Error('Saved records refreshed; this attempt still cannot be confirmed. Inspect Accounts and Posts before starting again.');
+  }
+  function finishFirstPost(walk) {
+    const item = sourceItems().find(source => (source.review_ids || []).includes(walk.reviewId));
+    const accountId = walk.saved, count = walk.flagCount;
+    accountWalk = null;
+    closeDialogIfOpen();
+    navigate('review',{account:accountId,status:item ? sourceFilterFor(item) : count ? 'needs_you' : count === 0 ? 'history' : 'all'});
+    if (item) setTimeout(() => sourceDetail(item.id),0);
+    toast(count ? `Post checked. ${count} possible boundary ${count === 1 ? 'issue' : 'issues'} to review in context.` : count === 0 ? 'Post checked. Nothing matched in the saved scope; the clean check is in History.' : 'Post saved and checked. Open it from the review list to see the result.');
+  }
+  // Closing, Escape and the close event all end the walk at once; a request already sent may still complete.
+  function cancelFirstPost() {
+    const walk = accountWalk;
+    if (walk?.route !== 'first-post') return;
+    walk.cancelled = true;
+    accountWalk = null;
+    if (walk.posting || walk.uncertain) toast('Closed. A save that was already sent may still complete. Refresh Accounts and Posts before trying again.');
   }
   async function howPostsArrive() {
     openDialog(dialogShell('How do my posts get here?','Your accounts are saved.',`<div class="arrival-doors"><button class="button primary" data-action="connect-assistant">Connect your assistant ${icon('copy')}</button><button class="button quiet" data-action="import-from-welcome">I have a Resonance backup</button><span>Import an archive <small>Coming next</small></span></div>`,'<button class="button quiet" data-action="close-dialog">Done</button>'));
@@ -1583,8 +1711,8 @@
   }
   function excerptForm(accountId = '') {
     if (!state.data.accounts.length) { accountForm(); return; }
-    const body = `<div class="form-grid"><div class="field full"><label for="excerpt-account">Which account posted this?</label><select id="excerpt-account" name="account_id">${state.data.accounts.map(account => `<option value="${esc(account.id)}" ${accountId === account.id ? 'selected' : ''}>${esc(account.platform)} · ${esc(handleOf(account))}</option>`).join('')}</select></div><div class="field"><label for="excerpt-kind">Type of activity</label><select id="excerpt-kind" name="kind"><option value="post">Post</option><option value="comment">Comment</option><option value="reply">Reply</option></select></div><div class="field"><label for="excerpt-title">Label <span>optional</span></label><input id="excerpt-title" name="title" maxlength="240" placeholder="Something you will recognize"></div><div class="field full"><label for="excerpt-text">Your original text</label><textarea id="excerpt-text" name="text" required maxlength="20000" placeholder="Paste your own post, comment, or reply."></textarea><span class="field-help">Use your own authored text. Leave private messages out.</span></div><div class="field full"><label for="excerpt-url">Link to the original <span>optional</span></label><input id="excerpt-url" name="source_url" type="url" maxlength="2048" placeholder="https://…"></div></div><div class="scope-strip">${icon('shield')}<span>This saves the excerpt and checks it against the account’s boundaries. Results are prompts for your review. Images, video and surrounding conversation are not checked.</span></div>`;
-    openDialog(dialogShell('Does this fit the account?','Save an excerpt for a check against its daring and SFW settings.',body,`<button class="button quiet" type="button" data-action="close-dialog">Cancel</button><button class="button primary" type="submit">Save & check ${icon('arrow')}</button>`,'excerpt-form'));
+    const body = `<div class="form-grid"><div class="field full"><label for="excerpt-account">Which account posted this?</label><select id="excerpt-account" name="account_id">${state.data.accounts.map(account => `<option value="${esc(account.id)}" ${accountId === account.id ? 'selected' : ''}>${esc(account.platform)} · ${esc(handleOf(account))}</option>`).join('')}</select></div><div class="field"><label for="excerpt-kind">Type of activity</label><select id="excerpt-kind" name="kind"><option value="post">Post</option><option value="comment">Comment</option><option value="reply">Reply</option></select></div><div class="field"><label for="excerpt-title">Label <span>optional</span></label><input id="excerpt-title" name="title" maxlength="240" placeholder="Something you will recognize"></div><div class="field full"><label for="excerpt-text">Your post</label><textarea id="excerpt-text" name="text" required maxlength="20000" placeholder="Paste your own post, comment, or reply."></textarea><span class="field-help">Use your own authored text. Leave private messages out.</span></div><div class="field full"><label for="excerpt-url">Link to the original <span>optional</span></label><input id="excerpt-url" name="source_url" type="url" maxlength="2048" placeholder="https://…"></div></div><div class="scope-strip">${icon('shield')}<span>This saves the excerpt and checks it against the account’s boundaries. Results are prompts for your review. Images, video and surrounding conversation are not checked.</span></div>`;
+    openDialog(dialogShell('Check a post','Save an excerpt for a check against its daring and SFW settings.',body,`<button class="button quiet" type="button" data-action="close-dialog">Cancel</button><button class="button primary" type="submit">Save & check ${icon('arrow')}</button>`,'excerpt-form'));
   }
   function reviewForm(accountId = '', severity = 'suggestion') {
     if (!state.data.accounts.length) {accountForm();return;}
@@ -1682,12 +1810,12 @@
     if (!item) return;
     const account = accountById(item.account_id);
     const request = activeRequestForSource(item);
-    const findings = Array.isArray(item.findings) ? item.findings : [];
+    const findings = shownFindings(item);
     const selectedIndex = findingIndex === null ? -1 : Number(findingIndex);
     const records = sourceItemAttestations(item);
     const evidence = (item.review_ids || []).map(reviewById).filter(Boolean);
     const requests = (item.request_ids || []).map(requestById).filter(Boolean);
-    const body = `<div class="detail-status">${sourceStatusBadge(item)}${item.source_changed ? '<span class="badge attention">Source changed</span>' : ''}</div><div class="detail-account">${platformIcon(account)}<div><h3>${esc(account?.platform || 'Account')}</h3><p>${esc(handleOf(account) || item.identity_note || 'Identity not recorded')}</p>${sourceLink(item.source_url,'Open exact original')}</div></div><div class="detail-block"><div class="detail-label">SAVED EXCERPT · MAY BE PARTIAL</div>${item.excerpt ? `<blockquote class="review-excerpt">${highlightedText(item)}</blockquote>` : '<p class="detail-text">No original excerpt was saved. Use the exact source link to inspect the original.</p>'}</div>${reviewContext(findings)}${editAvailabilityPanel(item,request)}${!item.precise_source ? `<div class="source-required">${icon('info')}<div><h3>A precise source is required for edit or delete work.</h3><p>${esc(item.identity_note || 'This evidence remains readable, but it cannot authorize a platform change.')}</p></div></div>` : ''}<div class="detail-block"><div class="detail-label">FINDINGS · ${findings.length}</div>${findings.length ? `<div class="source-findings">${findings.map((finding,index) => `<section class="source-finding ${selectedIndex === index ? 'selected' : ''}" id="finding-${index}">${badge(finding.severity || 'suggestion',finding.title || 'Finding')}<p>${esc(finding.detail || 'No detail was recorded.')}</p><small>${esc(finding.kind || 'evidence')} · ${(finding.review_ids || []).length} review ${(finding.review_ids || []).length === 1 ? 'record' : 'records'} · ${(finding.flag_ids || []).length} ${(finding.flag_ids || []).length === 1 ? 'flag' : 'flags'}</small><small>${esc(provenanceText(finding.provenance))}</small></section>`).join('')}</div>` : '<p class="detail-text">Checked locally; nothing matched in the saved scope.</p>'}</div>${request ? `<button class="current-request" data-action="request-detail" data-id="${esc(request.id)}"><span>${requestBadge(request)}${esc(requestActionLabel[request.action] || request.action)} work</span>${icon('arrow')}</button>` : ''}${records.length ? `<div class="dialog-subsection"><h3>Done by you</h3>${records.map(record => `<div class="attestation-record"><strong>${esc(requestActionLabel[record.action] || record.action)} · ${esc(record.execution_state === 'verified' ? 'Verified' : record.execution_state === 'reopened' ? 'Reopened' : 'Verification pending')}</strong><time>${esc(dateText(record.done_at || record.created_at,true))}</time><p>${esc(record.note)}</p>${record.blocker_reason ? `<p class="request-blocker">${esc(record.blocker_reason)}</p>` : ''}${record.execution_state === 'blocked' ? blockerMove(record,item,{attestation:true}) : ''}${record.result_url ? sourceLink(record.result_url,'Open result link') : ''}</div>`).join('')}</div>` : ''}${evidence.length || requests.length ? `<details class="source-history"><summary>Evidence and request history <span>${evidence.length + requests.length}</span></summary>${evidence.map(review => `<section><strong>${esc(review.title || 'Saved review')}</strong><small>${esc(review.origin || 'review')} · ${esc(dateText(review.reviewed_at || review.updated_at,true))}</small>${review.excerpt ? `<blockquote class="review-excerpt">${esc(review.excerpt)}</blockquote>` : '<p>No excerpt saved.</p>'}${review.finding ? `<p>${esc(review.finding)}</p>` : ''}${sourceLink(review.source_url,'Open recorded source')}</section>`).join('')}${requests.map(saved => `<button class="current-request quiet" data-action="request-detail" data-id="${esc(saved.id)}"><span>${requestBadge(saved)}${esc(requestActionLabel[saved.action] || saved.action)} · ${esc(dateText(saved.created_at,true))}</span>${icon('arrow')}</button>`).join('')}</details>` : ''}<div class="scope-strip">${icon('info')}<span>Findings preserve their saved evidence and provenance. The excerpt may be partial. Use the exact source before changing platform content.</span></div>${sourceNextMove(item)}<div class="source-dialog-actions">${sourceActions(item)}</div>`;
+    const body = `<div class="detail-status">${sourceStatusBadge(item)}${item.source_changed ? '<span class="badge attention">Source changed</span>' : ''}</div><div class="detail-account">${platformIcon(account)}<div><h3>${esc(account?.platform || 'Account')}</h3><p>${esc(handleOf(account) || item.identity_note || 'Identity not recorded')}</p>${sourceLink(item.source_url,'Open exact original')}</div></div><div class="detail-block"><div class="detail-label">SAVED EXCERPT · MAY BE PARTIAL</div>${item.excerpt ? `<blockquote class="review-excerpt">${highlightedText(item)}</blockquote>` : '<p class="detail-text">No original excerpt was saved. Use the exact source link to inspect the original.</p>'}</div><div class="source-dialog-actions">${sourceActions(item)}</div>${reviewContext(findings)}${editAvailabilityPanel(item,request)}${!item.precise_source ? `<div class="source-required">${icon('info')}<div><h3>A precise source is required for edit or delete work.</h3><p>${esc(item.identity_note || 'This evidence remains readable, but it cannot authorize a platform change.')}</p></div></div>` : ''}<div class="detail-block"><div class="detail-label">FINDINGS · ${findings.length}</div>${findings.length ? `<div class="source-findings">${findings.map((finding,index) => `<section class="source-finding ${selectedIndex === index ? 'selected' : ''}" id="finding-${index}">${badge(finding.severity || 'suggestion',finding.title || 'Finding')}<p>${esc(finding.detail || 'No detail was recorded.')}</p><small>${esc(finding.kind || 'evidence')} · ${(finding.review_ids || []).length} review ${(finding.review_ids || []).length === 1 ? 'record' : 'records'} · ${(finding.flag_ids || []).length} ${(finding.flag_ids || []).length === 1 ? 'flag' : 'flags'}</small><small>${esc(provenanceText(finding.provenance))}</small></section>`).join('')}</div>` : '<p class="detail-text">Checked locally; nothing matched in the saved scope.</p>'}</div>${request ? `<button class="current-request" data-action="request-detail" data-id="${esc(request.id)}"><span>${requestBadge(request)}${esc(requestActionLabel[request.action] || request.action)} work</span>${icon('arrow')}</button>` : ''}${records.length ? `<div class="dialog-subsection"><h3>Done by you</h3>${records.map(record => `<div class="attestation-record"><strong>${esc(requestActionLabel[record.action] || record.action)} · ${esc(record.execution_state === 'verified' ? 'Verified' : record.execution_state === 'reopened' ? 'Reopened' : 'Verification pending')}</strong><time>${esc(dateText(record.done_at || record.created_at,true))}</time><p>${esc(record.note)}</p>${record.blocker_reason ? `<p class="request-blocker">${esc(record.blocker_reason)}</p>` : ''}${record.execution_state === 'blocked' ? blockerMove(record,item,{attestation:true}) : ''}${record.result_url ? sourceLink(record.result_url,'Open result link') : ''}</div>`).join('')}</div>` : ''}${evidence.length || requests.length ? `<details class="source-history"><summary>Evidence and request history <span>${evidence.length + requests.length}</span></summary>${evidence.map(review => `<section><strong>${esc(review.title || 'Saved review')}</strong><small>${esc(review.origin || 'review')} · ${esc(dateText(review.reviewed_at || review.updated_at,true))}</small>${review.excerpt ? `<blockquote class="review-excerpt">${esc(review.excerpt)}</blockquote>` : '<p>No excerpt saved.</p>'}${review.finding ? `<p>${esc(review.finding)}</p>` : ''}${sourceLink(review.source_url,'Open recorded source')}</section>`).join('')}${requests.map(saved => `<button class="current-request quiet" data-action="request-detail" data-id="${esc(saved.id)}"><span>${requestBadge(saved)}${esc(requestActionLabel[saved.action] || saved.action)} · ${esc(dateText(saved.created_at,true))}</span>${icon('arrow')}</button>`).join('')}</details>` : ''}<div class="scope-strip">${icon('info')}<span>Findings preserve their saved evidence and provenance. The excerpt may be partial. Use the exact source before changing platform content.</span></div>${sourceNextMove(item)}`;
     openDialog(dialogShell(item.title || 'Saved source',item.identity_note || 'One source, all saved findings.',body,`<button class="button quiet" data-action="close-dialog">Close</button>`));
     if (selectedIndex >= 0) setTimeout(() => $(`#finding-${selectedIndex}`,dialog)?.scrollIntoView({block:'center'}),0);
   }
@@ -1881,7 +2009,7 @@
   }
   function settingsDialog() {
     const {settings} = state.data;
-    const body = `<div class="settings-section"><h3>Make it yours</h3><div class="form-grid"><div class="field"><label for="settings-name">Your name <span>optional</span></label><input id="settings-name" name="display_name" maxlength="120" value="${esc(settings.display_name)}" placeholder="What should we call you?" autocomplete="given-name"></div><div class="field"><label for="theme">Appearance</label><select id="theme" name="theme">${Object.entries(THEMES).map(([value,theme]) => `<option value="${esc(value)}" ${settings.theme === value ? 'selected' : ''}>${esc(theme.label)}</option>`).join('')}</select></div></div><button class="text-button" type="button" data-action="setup-identity">Edit personal brand ${icon('arrow')}</button></div><div class="settings-section"><h3>Your data</h3><div id="data-folder-details" aria-live="polite">Loading folder details…</div><p>Export a full Resonance backup, or bring one back into this workspace. Backups include your saved communication context and history.</p><div class="settings-data-actions"><a class="button quiet small" ${downloadAttributes('/api/export')}>${icon('download')}Export backup</a><button class="button quiet small" type="button" data-action="choose-import">${icon('upload')}Import Resonance backup</button><input id="import-file" type="file" accept="application/json,.json" hidden></div><p class="settings-backup-note">Import accepts Resonance’s own backup format. Matching IDs are checked for consistency; conflicting original evidence is rejected. Other saved records stay in place. Imported access must be checked again, and any imported pending request waits for you to confirm it here.</p></div><div class="settings-section"><h3>A private local workspace</h3><div class="settings-edition"><div><span>Account access</span><span>Saved evidence with dates · no live connection claim</span></div><div><span>Mail</span><span>Saved preview scope and local reply drafts · no sending</span></div><div><span>Review evidence</span><span>Saved feedback, excerpts, reports, and requests</span></div><div><span>Boundary and draft checks</span><span>Limited local wording rules</span></div><div><span>Scheduled reports</span><span>${esc(scheduleLabel())}</span></div><div><span>Platform requests</span><span>Queued here; verified outcomes appear in Requests</span></div></div><p class="settings-backup-note">Your data is saved on this computer. Stay signed in in Chrome; keep this computer awake and unlocked, with your assistant available. Saved accounts are not live connections.</p></div>`;
+    const body = `<div class="settings-section"><h3>Make it yours</h3><div class="form-grid"><div class="field"><label for="settings-name">Your name <span>optional</span></label><input id="settings-name" name="display_name" maxlength="120" value="${esc(settings.display_name)}" placeholder="What should we call you?" autocomplete="given-name"></div><div class="field"><label for="theme">Appearance</label><select id="theme" name="theme">${Object.entries(THEMES).map(([value,theme]) => `<option value="${esc(value)}" ${settings.theme === value ? 'selected' : ''}>${esc(theme.label)}</option>`).join('')}</select></div></div><button class="text-button" type="button" data-action="setup-identity">Edit personal brand ${icon('arrow')}</button></div><div class="settings-section"><h3>Try samples</h3><p>Practice in a separate sample workspace. Your saved posts stay untouched.</p><button class="button quiet small" type="button" data-action="${showingSamples() ? 'clear-samples' : 'start-samples'}">${showingSamples() ? 'Clear samples' : 'Try samples'}</button></div><div class="settings-section"><h3>Your data</h3><div id="data-folder-details" aria-live="polite">Loading folder details…</div><p>Export a full Resonance backup, or bring one back into this workspace. Backups include your saved communication context and history.</p><div class="settings-data-actions"><a class="button quiet small" ${downloadAttributes('/api/export')}>${icon('download')}Export backup</a><button class="button quiet small" type="button" data-action="choose-import">${icon('upload')}Import Resonance backup</button><input id="import-file" type="file" accept="application/json,.json" hidden></div><p class="settings-backup-note">Import accepts Resonance’s own backup format. Matching IDs are checked for consistency; conflicting original evidence is rejected. Other saved records stay in place. Imported access must be checked again, and any imported pending request waits for you to confirm it here.</p></div><div class="settings-section"><h3>A private local workspace</h3><div class="settings-edition"><div><span>Account access</span><span>Saved evidence with dates · no live connection claim</span></div><div><span>Mail</span><span>Saved preview scope and local reply drafts · no sending</span></div><div><span>Review evidence</span><span>Saved feedback, excerpts, reports, and requests</span></div><div><span>Boundary and draft checks</span><span>Limited local wording rules</span></div><div><span>Scheduled reports</span><span>${esc(scheduleLabel())}</span></div><div><span>Platform requests</span><span>Queued here; verified outcomes appear in Requests</span></div></div><p class="settings-backup-note">Your data is saved on this computer. Stay signed in in Chrome; keep this computer awake and unlocked, with your assistant available. Saved accounts are not live connections.</p></div>`;
     openDialog(dialogShell('A workspace that feels like you.','Settings & data',body,`<button class="button quiet" type="button" data-action="close-dialog">Done</button><button class="button primary" type="submit">Save preferences ${icon('check')}</button>`,'settings-form'));
   }
   function aboutDialog() {
@@ -1910,8 +2038,11 @@
       const result = await api('/api/action-requests','POST',{review_id:reviewId,action,...(action === 'edit' ? {proposed_text:proposedText} : {})});
       if (!await reload()) throw new Error('The request was saved, but the workspace could not refresh. Reopen Resonance to see its current status.');
       if (action === 'keep') {
+        const kept = sourceItems().find(source => (source.review_ids || []).includes(reviewId));
         closeDialogIfOpen();
-        toast('Keep saved for this source. Eligible queued work was cancelled; social content was not changed.');
+        navigate('review',{status:kept ? sourceFilterFor(kept) : 'history'});
+        if (kept) setTimeout(() => sourceDetail(kept.id),0);
+        toast('Kept. Your choice is saved here; nothing on the platform changed.');
       } else {
         requestDetail(result.action_request.id);
         toast(result.created ? `${requestActionLabel[action]} request saved.` : 'That request was already saved. Showing its current status.');
@@ -2018,13 +2149,29 @@
         if (!await reload()) throw new Error('The exact link was saved. Refresh to see its new source card.');
         sourceDetail(result.source_item.id);
         toast('Exact link saved. The original observation stays in history.');
+      } else if (form.getAttribute('id') === 'walk-post-form') {
+        const walk = accountWalk;
+        if (!walk || walk.route !== 'first-post' || walk.attempt || walk.posting) return;
+        // Validate a separate candidate; the walk changes only once every check has passed.
+        const text = String(data.get('text') || '');
+        const candidate = {text,platform:value('platform'),input:value('identity'),kind:value('kind') || 'post',title:value('title'),source_url:value('source_url')};
+        if (!text.trim()) throw new Error('Paste the post you wrote before continuing.');
+        if (text.length > 20000) throw new Error('That post is longer than 20,000 characters. Paste a shorter part of it.');
+        if (!platforms.includes(candidate.platform) || ['Gmail','Outlook'].includes(candidate.platform)) throw new Error('Choose the platform this post belongs to.');
+        const identity = readAccountIdentity(candidate.platform,candidate.input);
+        Object.assign(walk,candidate,identity,{step:'boundaries'});
+        accountWalkDialog();
       } else if (form.getAttribute('id') === 'walk-identity-form') {
         const identity = readAccountIdentity(accountWalk.platform,value('identity'));
         Object.assign(accountWalk,identity,{input:value('identity'),step:'boundaries'});
         accountWalkDialog();
       } else if (form.getAttribute('id') === 'walk-boundaries-form') {
+        if (!accountWalk) return;
+        // After the first attempt starts the form is read-only: the frozen payload is used, never these values.
+        if (accountWalk.route === 'first-post' && accountWalk.attempt) {await saveFirstPost(accountWalk);return;}
         const identity = value('identity_mode');
         Object.assign(accountWalk,{identity_mode:identity,daring:value('daring'),sfw_only:identity !== 'alias' || data.has('sfw_only')});
+        if (accountWalk.route === 'first-post') {await saveFirstPost(accountWalk);return;}
         const {platform,handle,url,identity_mode,daring,sfw_only} = accountWalk;
         // Keep the saved ID before reloading so a failed refresh cannot add it twice.
         const walk = accountWalk;
@@ -2141,7 +2288,20 @@
     else if (action === 'play-sample') playSample(id);
     else if (action === 'sample-decision') await sampleDecision(button);
     else if (action === 'welcome-paste') {if (state.data.accounts.length) excerptForm(); else startAccountWalk('','first-post');}
-    else if (action === 'draft-no-account') {accountWalk = null;closeDialogIfOpen();navigate('draft');}
+    else if (action === 'draft-no-account') {
+      if (accountWalk?.route === 'first-post' && (accountWalk.attempt || accountWalk.posting)) return;
+      const field = accountWalk?.step === 'post' ? $('#walk-post-text') : null;
+      const typed = field ? String(field.value || '') : accountWalk?.text || '';
+      accountWalk = null;
+      if (typed.trim()) {
+        clearTimeout(draftTimer);state.draftSequence++;
+        state.draft = (state.draft || '').trim() && state.draft !== typed ? `${state.draft}
+
+${typed}` : typed;
+        state.draftResult = null;state.draftError = '';state.draftBusy = false;
+      }
+      closeDialogIfOpen();navigate('draft');
+    }
     else if (action === 'reader-check-all') readerStart(readerAllIds());
     else if (action === 'reader-check-account') readerStart([id]);
     else if (action === 'reader-first-check') {readerAccountDialog(id);readerStart([id]);}
@@ -2163,8 +2323,16 @@
     else if (action === 'reader-corpus') await readerCorpusDialog(id);
     else if (action === 'reader-corpus-more') await readerCorpusDialog(readerCorpus?.accountId,true);
     else if (action === 'reader-findings') {closeDialogIfOpen();navigate('review',{account:id,status:'all'});}
-    else if (action === 'walk-platform') {accountWalk.platform = button.dataset.platform;accountWalk.step = 'identity';accountWalkDialog();}
-    else if (action === 'walk-back') {accountWalk.step = button.dataset.step;accountWalkDialog();}
+    else if (action === 'walk-platform') {if (accountWalk?.route === 'first-post' && (accountWalk.attempt || accountWalk.posting)) return;accountWalk.platform = button.dataset.platform;accountWalk.step = 'identity';accountWalkDialog();}
+    else if (action === 'walk-back') {
+      if (!accountWalk || accountWalk.route === 'first-post' && (accountWalk.attempt || accountWalk.posting)) return;
+      const boundaries = accountWalk?.step === 'boundaries' ? $('#walk-boundaries-form')?.elements : null;
+      if (boundaries) {
+        const mode = boundaries.identity_mode?.value || accountWalk.identity_mode;
+        Object.assign(accountWalk,{identity_mode:mode,daring:boundaries.daring?.value || accountWalk.daring,sfw_only:mode !== 'alias' || !!boundaries.sfw_only?.checked});
+      }
+      accountWalk.step = button.dataset.step;accountWalkDialog();
+    }
     else if (action === 'account-walk-done') {
       const found = accountWalk?.route === 'discovery';
       accountWalk = null;
@@ -2281,7 +2449,7 @@
     handleAction(button).catch(error => {if (dialog.open) dialogError(error);else toast(error.message);});
   });
   document.addEventListener('submit', event => {
-    if (!['walk-identity-form','walk-boundaries-form','source-link-form','account-form','review-form','settings-form','excerpt-form','action-request-form','brand-form','mail-draft-form','attestation-form'].includes(event.target.getAttribute('id'))) return;
+    if (!['walk-post-form','walk-identity-form','walk-boundaries-form','source-link-form','account-form','review-form','settings-form','excerpt-form','action-request-form','brand-form','mail-draft-form','attestation-form'].includes(event.target.getAttribute('id'))) return;
     event.preventDefault();
     saveForm(event.target);
   });
@@ -2332,7 +2500,8 @@
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && state.view === 'draft' && !dialog.open) {event.preventDefault();checkDraft();}
   });
   dialog.addEventListener('click',event => {if (event.target === dialog) {const rect = dialog.getBoundingClientRect();if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeDialog();}});
-  dialog.addEventListener('close',() => {if (readerDialogKind === 'setup') discoveryDialogClosed();readerDialogKind = '';readerCorpus = null;readerCorpusSequence++;if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({preventScroll:true});if (state.refreshPending) updateMonitoringView();if (state.communicationRefreshPending) updateCommunicationView();if (state.sourceRefreshPending) updateSourceView();refreshMonitoring();});
+  dialog.addEventListener('cancel',cancelFirstPost);
+  dialog.addEventListener('close',() => {if (dialog.open) return;cancelFirstPost();if (readerDialogKind === 'setup') discoveryDialogClosed();readerDialogKind = '';readerCorpus = null;readerCorpusSequence++;if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({preventScroll:true});if (state.refreshPending) updateMonitoringView();if (state.communicationRefreshPending) updateCommunicationView();if (state.sourceRefreshPending) updateSourceView();refreshMonitoring();});
   window.addEventListener('hashchange',() => {state.view = navNames[location.hash.slice(1)] ? location.hash.slice(1) : 'overview';render();$('#main').focus({preventScroll:true});});
   window.addEventListener('online',() => {if (!state.connected) refreshMonitoring();});
   document.addEventListener('visibilitychange',() => {if (document.visibilityState === 'visible') refreshMonitoring();});

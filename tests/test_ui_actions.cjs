@@ -617,5 +617,84 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
   assert.equal(history.ui.state.data.action_requests[0].status,'cancelled','inspection leaves the retired request unchanged');
   assert.equal(history.calls.length,0,'history inspection grants no execution and calls no API');
 
+  // One copy of the source actions sits right after the saved post, before provenance and history.
+  const placed=setup();
+  placed.ui.sourceDetail('source-1');
+  const placedHtml=placed.html();
+  assert.equal((placedHtml.match(/data-action="source-keep"/g)||[]).length,1,'one copy of the source controls');
+  assert.ok(placedHtml.indexOf('SAVED EXCERPT')<placedHtml.indexOf('source-dialog-actions'));
+  assert.ok(placedHtml.indexOf('source-dialog-actions')<placedHtml.indexOf('FINDINGS ·'),'Keep is reachable before the findings');
+  assert.ok(placedHtml.indexOf('source-dialog-actions')<placedHtml.indexOf('Evidence and request history'),'Keep is reachable before the history');
+
+  // Keep leaves a visible, durable confirmation instead of an empty Needs-you list.
+  const keepPage=setup();
+  keepPage.setHandler(url=>url === '/api/action-requests'
+    ? response({action_request:{id:'keep-1',review_id:'r1',action:'keep',status:'completed'},created:true})
+    : response({...keepPage.data,source_items:[{...keepPage.data.source_items[0],status:'kept',status_label:'Kept',request_ids:[],active_request_id:null}],action_requests:[]}));
+  keepPage.ui.state.filters.status='needs_you';
+  await keepPage.ui.handleAction(Object.assign(element(),{dataset:{action:'confirm-keep',review:'r1'}}));
+  assert.deepEqual(JSON.parse(keepPage.calls[0].body),{review_id:'r1',action:'keep'});
+  assert.equal(keepPage.ui.state.filters.status,'history','the kept post is shown in History');
+  assert.ok(keepPage.ui.renderReview().includes('One authored comment'),'the kept post is listed');
+  assert.ok(keepPage.html().includes('One authored comment')&&keepPage.html().includes('source-dialog-actions'),'its saved detail opens');
+  assert.equal(keepPage.get('#toast').textContent,'Kept. Your choice is saved here; nothing on the platform changed.');
+  assert.ok(!/cancelled|stopped/i.test(keepPage.get('#toast').textContent),'no claim about unresolved provider work');
+
+  // Running or uncertain work is never silently cancelled; queued work still asks first.
+  const runningKeep=setup();
+  Object.assign(runningKeep.ui.state.data.action_requests[0],{execution_state:'running',status:'pending',can_cancel:false,can_execute:false});
+  await runningKeep.ui.keepSource(Object.assign(element(),{dataset:{source:'source-1'}}));
+  assert.equal(runningKeep.calls.length,0,'running work blocks Keep without saving anything');
+  assert.ok(runningKeep.html().includes('Keep cannot claim it was stopped'));
+  const queuedKeep=setup();
+  await queuedKeep.ui.keepSource(Object.assign(element(),{dataset:{source:'source-1'}}));
+  assert.equal(queuedKeep.calls.length,0,'queued work asks before Keep replaces it');
+  assert.ok(queuedKeep.html().includes('data-action="confirm-keep"'));
+
+  // Today counts kept posts even when every attention counter is zero, inside the refreshable summary container.
+  const keptToday=setup();
+  Object.assign(keptToday.ui.state.data.source_items[0],{status:'kept',needs_attention:false});
+  keptToday.ui.state.data.action_requests=[];
+  const keptHtml=keptToday.ui.renderOverview();
+  assert.ok(keptHtml.includes('<strong>1</strong> kept post.'));
+  assert.ok(keptHtml.indexOf('id="today-summary-content"')<keptHtml.indexOf('View saved posts')&&keptHtml.indexOf('View saved posts')<keptHtml.indexOf('class="today-grid"'));
+  assert.ok(keptHtml.includes('data-action="review-filter" data-status="history"'));
+  assert.ok(setup().ui.renderOverview().includes('<strong>0</strong> kept posts.'));
+
+  // A local review's generated summary is not a second concern beside its own rule flags; everything else stays.
+  const summary=(extra={})=>({id:'r1',title:'A saved comment to review',detail:'Local checks matched: One; Two. These are possible issues.',severity:'attention',kind:'comment',review_ids:['r1'],flag_ids:[],quotes:[],provenance:'local:review',...extra});
+  const rule=(id)=>({id,title:`Rule ${id}`,detail:`Rule ${id} detail`,severity:'attention',kind:'comment',review_ids:['r1'],flag_ids:[id],quotes:[],provenance:'local boundary rule:x'});
+  const findingCount=findings=>{
+    const r=setup();
+    r.ui.state.data.source_items[0].findings=findings;
+    r.ui.sourceDetail('source-1');
+    return {count:Number(/FINDINGS · (\d+)/.exec(r.html())[1]),html:r.html(),stored:r.ui.state.data.source_items[0].findings.length};
+  };
+  const matched=findingCount([summary(),rule('fl1'),rule('fl2')]);
+  assert.equal(matched.count,2,'two rule flags, not three concerns');
+  assert.equal(matched.stored,3,'the saved finding list is untouched');
+  assert.ok(matched.html.includes('Rule fl1')&&matched.html.includes('Rule fl2')&&!matched.html.includes('Local checks matched'));
+  assert.equal(findingCount([summary({provenance:'local:review; monitoring report run-1 finding f1'}),rule('fl1')]).count,2,'mixed provenance stays');
+  assert.equal(findingCount([summary({provenance:'manual:review'}),rule('fl1')]).count,2,'a manual finding stays');
+  assert.equal(findingCount([summary({detail:'I wrote this note myself.'}),rule('fl1')]).count,2,'a summary that is not the generated restatement stays');
+  assert.equal(findingCount([summary({review_ids:['r1','r9']}),rule('fl1')]).count,2,'a summary with an unmatched review stays');
+  assert.equal(findingCount([summary({flag_ids:['fl1']}),rule('fl1')]).count,2,'a finding that carries a flag stays');
+  const cleanFinding=findingCount([summary({detail:'No local boundary rules matched this saved text.',severity:'strength'})]);
+  assert.equal(cleanFinding.count,1,'a clean check keeps its scope wording');
+  assert.ok(cleanFinding.html.includes('No local boundary rules matched'));
+
+  // Samples stay reachable from Settings after real records exist, and the isolation guards are unchanged.
+  const door=setup();
+  door.ui.settingsDialog();
+  assert.ok(door.html().includes('Try samples')&&door.html().includes('data-action="start-samples"'));
+  assert.ok(door.html().includes('Practice in a separate sample workspace. Your saved posts stay untouched.'));
+  door.setHandler(url=>url === '/api/samples' ? response({mode:'samples'}) : response({...door.data,workspace:{mode:'samples',token:'sample-epoch'}}));
+  await door.ui.handleAction(Object.assign(element(),{dataset:{action:'start-samples'}}));
+  assert.equal(door.calls[0].url,'/api/samples');
+  assert.equal(door.calls[0].method,'POST');
+  assert.equal(door.ui.state.data.workspace.mode,'samples');
+  door.ui.settingsDialog();
+  assert.ok(door.html().includes('data-action="clear-samples"')&&!door.html().includes('data-action="start-samples"'));
+
   console.log('B1 source UI renderer/handler checks passed (no browser or visual claim).');
 })().catch(error=>{console.error(error);process.exitCode=1;});

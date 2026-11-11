@@ -266,7 +266,7 @@ Any key not named on this page is refused.
 | `kind` | `post`, `comment`, `reply`, or `account` for something about the account or your coverage rather than one item. |
 | `title` | Required, up to 240 characters. |
 | `detail` | Required, up to 4,000 characters. |
-| `source_url` | The item's **own permanent link** — not the profile, a feed or a search page. Keep and Snooze work without it; Modify and Delete need it. For an `account` finding, the profile link. |
+| `source_url` | The item's **own permanent link** — not the profile, a feed or a search page. For a YouTube community-post comment or reply that is `/post/<id>?lc=<comment>`, never the bare `/post/<id>`. Keep and Snooze work without it; Modify and Delete need it. For an `account` finding, the profile link. |
 | `text` | **Required for a `post`, `comment` or `reply`**: the whole text as you saw it, up to 20,000 characters. If the item is longer, save the passage around the flagged words exactly as it appears, one passage per finding, and begin `detail` with `Excerpt:`. Left out for `account`. |
 | `quotes` | **Required for a `post`, `comment` or `reply`, a `strength` included:** one to 20 distinct pieces of `text`, each up to 500 characters, copied exactly — the words that support the finding. They are what Resonance marks in the saved text; a finding without them marks nothing. One quote that is not found in `text` refuses the whole report. Left out for an `account` finding. |
 
@@ -501,7 +501,7 @@ The intake file is one object with 1 to 50 items. Every key is required except `
 ```
 
 - `account_id` is copied from `--profile` and must be a saved social account. `kind` is `comment` or `reply` (X replies are `reply`). `visibility` must be `public`.
-- `source_url` is the comment's own permanent link: a post, profile, feed or search page is refused, and so is a platform without supported exact comment links (for example Discord, Substack, Threads). The inbox also accepts Facebook group `/permalink/` comment links; this does not broaden edit/delete targets. On X the reply URL must name the saved account. Other platforms may name the parent post's author in the URL; compare the comment author's observed identity separately. `parent_url` is the post it answers, if known.
+- `source_url` is the comment's own permanent link: a post, profile, feed or search page is refused, and so is a platform without supported exact comment links (for example Discord, Substack, Threads). The inbox also accepts Facebook group `/permalink/` comment links; this does not broaden edit/delete targets. On YouTube the comment link is `/watch?v=<video>&lc=<comment>` or a community-post `/post/<id>?lc=<comment>`; the parent `/post/<id>` alone is refused. On X the reply URL must name the saved account. Other platforms may name the parent post's author in the URL; compare the comment author's observed identity separately. `parent_url` is the post it answers, if known.
 - `text` is the whole comment exactly as you saw it, up to 20,000 characters, and must begin with the address. `observed_at` is when you read it. Neither time may be in the future.
 - `evidence` is your dated observation, in the same terms as an identity observation: signed in as the saved account, and the comment's author profile. Handle **and** profile link must both match the saved account, and the check must fall within five minutes of reading the comment. This is your assertion. It is saved and shown as assistant-reported; the platform has confirmed nothing, and Resonance cannot check it.
 

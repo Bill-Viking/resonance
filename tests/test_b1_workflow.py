@@ -80,6 +80,102 @@ class B1WorkflowTests(unittest.TestCase):
         self.assertFalse(self.source(x_comment['id'])['precise_source'])
         self.assertNotEqual(self.source(x_post['id'])['id'], self.source(x_comment['id'])['id'])
 
+    def test_community_post_route_accepts_only_exact_comment_and_reply_links(self):
+        base = 'https://www.youtube.com/post/Ugkx_Synthetic-1'
+        exact = {
+            ('comment', base + '?lc=UgzSynthetic.1'): True,
+            ('reply', 'https://m.youtube.com/post/Ugkx_Synthetic-1?lc=UgzSynthetic.1.2&utm_source=x'): True,
+            ('reply', 'https://youtube.com/post/Ugkx_Synthetic-1/?lc=UgzSynthetic.1.2'): True,
+            ('post', base): False,
+            ('post', base + '?lc=UgzSynthetic.1'): False,
+            ('comment', base): False,
+            ('reply', base + '?lc='): False,
+            ('comment', base + '?lc=%20'): False,
+            ('comment', base + '?lc=one&lc=two'): False,
+            ('comment', base + '?list=one'): False,
+            ('comment', 'https://www.youtube.com/post/?lc=one'): False,
+            ('comment', 'https://www.youtube.com/post//?lc=one'): False,
+            ('comment', base + '/extra?lc=one'): False,
+            ('comment', base + '//?lc=one'): False,
+            ('comment', 'https://www.youtube.com/post/Ugkx%20Synthetic?lc=one'): False,
+            ('comment', 'https://www.youtube.com/post/Ugkx%2FSynthetic?lc=one'): False,
+            ('comment', 'https://www.youtube.com/post/Ugkx+Synthetic?lc=one'): False,
+            ('comment', 'https://www.youtube.com/posts/Ugkx_Synthetic-1?lc=one'): False,
+            ('comment', 'https://evil.test/post/Ugkx_Synthetic-1?lc=one'): False,
+            ('comment', 'https://www.youtube.com.evil.test/post/Ugkx_Synthetic-1?lc=one'): False,
+            ('comment', 'https://youtu.be/post/Ugkx_Synthetic-1?lc=one'): False,
+            ('sample', base + '?lc=one'): False,
+        }
+        for (kind, url), allowed in exact.items():
+            with self.subTest(kind=kind, url=url):
+                self.assertEqual(workflow.precise_source(url, 'YouTube', kind), allowed)
+        # The route is YouTube's alone; no other platform inherits it.
+        for platform in ('X', 'Instagram', 'Facebook', 'Reddit', 'TikTok', 'LinkedIn'):
+            self.assertFalse(workflow.precise_source(base + '?lc=one', platform, 'comment'), platform)
+        # Existing watch routes are unchanged.
+        self.assertTrue(workflow.precise_source('https://www.youtube.com/watch?v=video&lc=one', 'YouTube', 'comment'))
+        self.assertTrue(workflow.precise_source('https://www.youtube.com/watch?v=video', 'YouTube', 'post'))
+        self.assertFalse(workflow.precise_source('https://www.youtube.com/watch?v=video', 'YouTube', 'comment'))
+
+    def test_community_comment_links_keep_their_own_identity(self):
+        first = self.review(source_url='https://www.youtube.com/post/Ugkx_Synthetic-1?lc=one&gclid=tracking')
+        same = self.review(source_url='HTTPS://WWW.YOUTUBE.COM/post/Ugkx_Synthetic-1?lc=one&utm_source=test')
+        other_comment = self.review(source_url='https://www.youtube.com/post/Ugkx_Synthetic-1?lc=two')
+        other_post = self.review(source_url='https://www.youtube.com/post/Ugkx_Synthetic-2?lc=one')
+        parent = self.review(kind='post', source_url='https://www.youtube.com/post/Ugkx_Synthetic-1')
+        parent_with_lc = self.review(kind='post', source_url='https://www.youtube.com/post/Ugkx_Synthetic-1?lc=one')
+        grouped = self.source(first['id'])
+        self.assertTrue(grouped['precise_source'])
+        self.assertEqual(grouped['source_key'], 'https://www.youtube.com/post/Ugkx_Synthetic-1?lc=one')
+        self.assertEqual(set(grouped['review_ids']), {first['id'], same['id']})
+        self.assertEqual(workflow.comment_source_key(first['source_url']),
+                         workflow.comment_source_key(same['source_url']))
+        self.assertNotEqual(workflow.comment_source_key(first['source_url']),
+                            workflow.comment_source_key(other_comment['source_url']))
+        for review in (other_comment, other_post, parent, parent_with_lc):
+            self.assertNotEqual(self.source(review['id'])['id'], grouped['id'])
+        self.assertNotEqual(self.source(other_comment['id'])['source_key'], grouped['source_key'])
+        self.assertTrue(self.source(other_comment['id'])['precise_source'])
+        self.assertTrue(self.source(other_post['id'])['precise_source'])
+        for review in (parent, parent_with_lc):
+            self.assertFalse(self.source(review['id'])['precise_source'])
+        with self.assertRaises(server.Invalid):
+            self.store.mutate('POST', '/api/action-requests', {'review_id': parent['id'], 'action': 'delete'})
+        with self.assertRaises(server.Invalid):
+            self.store.mutate('POST', '/api/action-requests', {'review_id': parent_with_lc['id'], 'action': 'delete'})
+
+    def test_community_comment_and_reply_traverse_guarded_request_workflow(self):
+        links = {'comment': 'https://www.youtube.com/post/Ugkx_Synthetic-1?lc=UgzSynthetic.1',
+                 'reply': 'https://www.youtube.com/post/Ugkx_Synthetic-1?lc=UgzSynthetic.1.2'}
+        for kind, link in links.items():
+            with self.subTest(kind=kind):
+                review = self.review(kind=kind, source_url=link, title='Community ' + kind)
+                request = self.store.mutate('POST', '/api/action-requests', {
+                    'review_id': review['id'], 'action': 'delete'})[1]['action_request']
+                self.assertEqual(request['source_url'], link)
+                # Preflight is required: no start without a matching saved observation.
+                with self.assertRaises(server.Invalid):
+                    self.store.mutate('POST', '/api/action-requests/' + request['id'] + '/start', {})
+                state = self.store.state()
+                saved = next(value for value in state['action_requests'] if value['id'] == request['id'])
+                account = next(value for value in state['accounts'] if value['id'] == saved['account_id'])
+                # An observation of a different comment on the same post never matches.
+                other = link[:-1] + '9'
+                with self.assertRaises(server.Invalid):
+                    self.store.mutate('POST', '/api/action-requests/' + request['id'] + '/identity-check',
+                                      observation(account, saved, source_url=other))
+                self.assertEqual(self.store.mutate('POST', '/api/action-requests/' + request['id'] + '/identity-check',
+                                                   observation(account, saved))[0], 200)
+                started = start_checked(self.store, request['id'])[1]['action_request']
+                self.assertIsNotNone(started['attempt_id'])
+                target = next(value for value in self.store.state()['action_requests'] if value['id'] == request['id'])
+                self.assertEqual(target['execution_state'], 'running')
+                self.store.mutate('POST', '/api/monitor-runs', self.report(
+                    'community-' + kind, [self.outcome(target, 'request', 'verified')]))
+                done = next(value for value in self.store.state()['action_requests'] if value['id'] == request['id'])
+                self.assertEqual(done['status'], 'completed')
+                self.assertEqual(done['receipt_url'], link)
+
     def test_semantic_fingerprint_replay_and_identity_change(self):
         review = self.review()
         original = self.source(review['id'])

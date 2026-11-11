@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.1.0-preview.8 — source preview
+
+- First paste starts with your writing, then asks which account it belongs to.
+  A second step confirms the account boundaries before saving and checking.
+  Interrupted saves preserve the submitted text and distinguish a confirmed save
+  from an uncertain response; refreshing never repeats an uncertain request.
+- Keep appears beside the saved post and opens its saved History result. Today
+  shows kept posts even when nothing needs attention. Local rule summaries no
+  longer count as extra concerns when their individual findings are displayed.
+- Paste text becomes the primary action when account checks are unavailable.
+  Samples are also reachable from Settings after you have saved real posts.
+- Exact YouTube community comment and reply links retain their source identity.
+- Windows sample-workspace tests allow slow local requests to finish and close
+  their HTTP connections before temporary-data cleanup.
+
+This remains an early source preview. Desktop candidates are unsigned; physical
+first-user acceptance and browser-store distribution are separate release gates.
+The app still makes no outgoing connections, holds no credentials and has no
+model inside. Database schema 6 and backup format 3 are unchanged.
+
 ## 0.1.0-preview.7 — source preview
 
 - A self-contained desktop candidate opens Resonance without a separate Python

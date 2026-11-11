@@ -502,7 +502,10 @@ test('bridge rejections stop the check with a plain reason', async () => {
 
 // ---- page-level checks: the real app.js with the real client ----------------------------------
 function element() {
+  const listeners = new Map();
   return {innerHTML: '', textContent: '', value: '', content: '', dataset: {}, style: {}, hidden: false, open: false, isConnected: true, disabled: false,
+    addEventListener(name, fn) { if (!listeners.has(name)) listeners.set(name, []); listeners.get(name).push(fn); },
+    dispatchEvent(event) { for (const fn of listeners.get(event.type) || []) fn(event); },
     classList: {add() {}, remove() {}}, querySelector() { return null; }, querySelectorAll() { return []; }, childNodes: [],
     focus() { this.focused = true; }, select() {}, scrollIntoView() {}, setAttribute() {}, removeAttribute() {}, contains(node) { return node === this; },
     replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; }};
@@ -537,7 +540,7 @@ function pageFixture(overrides = {}) {
   let handler = () => { throw new Error('Unexpected request'); };
   const data = {settings: {display_name: 'Example', theme: 'dark'}, workspace: {token: 'workspace-one', mode: 'live'}, accounts: overrides.accounts || defaultAccounts(), reviews: [], policy_flags: [], source_items: [], action_requests: [], activity: [],
     communication: {messages: []}, monitoring: {runs: []}, reader_check_summary: overrides.summary || {count: 0, source_count: 0, revision_count: 0, recent: [], limit: 20}};
-  const context = {document: doc, URL, Intl, console, Date: FakeDate, location, window: {scrollTo() {}}, navigator: {clipboard: {writeText: async () => {}}},
+  const context = {document: doc, URL, Intl, console, Date: FakeDate, location, window: {scrollTo() {}, addEventListener() {}}, navigator: {clipboard: {writeText: async () => {}}},
     matchMedia: () => ({matches: false}), setTimeout: (fn, ms) => { timers.push({fn, ms}); return timers.length; }, clearTimeout: id => { if (timers[id - 1]) timers[id - 1] = {fn() {}, ms: 0}; }, sessionStorage: {getItem: key => store.has(key) ? store.get(key) : null, setItem: (key, value) => store.set(key, String(value)), removeItem: key => store.delete(key), get length() { return store.size; }, key: index => [...store.keys()][index] ?? null},
     FormData: class { constructor(form) { this.values = form.values; } get(key) { return this.values[key]; } has(key) { return Object.hasOwn(this.values, key); } },
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
@@ -546,9 +549,10 @@ function pageFixture(overrides = {}) {
   vm.createContext(context);
   if (!overrides.noReader) vm.runInContext(readerSource, context);
   if (!overrides.noDiscovery) vm.runInContext(discoverySource, context);
-  const cutoff = appSource.indexOf("  document.addEventListener('click'");
+  // Include the real event wiring; omit only page startup/polling.
+  const cutoff = appSource.indexOf('  if (readerClient) {readerClient.subscribe(renderReaderPanels);');
   assert.ok(cutoff > 0);
-  vm.runInContext(appSource.slice(0, cutoff) + '\n globalThis.ui={state,renderOverview,renderWelcome,handleAction,saveForm,readerClient,readerTodayContent,readerAccountBlock,readerReceiptHtml,readerSetupDialog,readerSetupLive,readerSetupState,readerCheckProgress,discovery,discoveryHtml,discoveryDialogClosed,resetWorkspaceEditors,importFile,renderReaderPanels,getWalk:() => accountWalk};\n})();', context);
+  vm.runInContext(appSource.slice(0, cutoff) + '\n globalThis.ui={state,renderOverview,renderWelcome,handleAction,saveForm,readerClient,readerTodayContent,readerAccountBlock,readerReceiptHtml,readerSetupDialog,readerSetupLive,readerSetupState,readerCheckProgress,discovery,discoveryHtml,discoveryDialogClosed,resetWorkspaceEditors,importFile,renderReaderPanels,cancelFirstPost,getWalk:() => accountWalk};\n})();', context);
   context.ui.state.data = structuredClone(data);
   context.ui.state.connected = true;
   context.ui.state.view = 'accounts';
@@ -651,20 +655,498 @@ test('welcome offers the three doors and Paste my first post keeps its route thr
   for (const door of ['Set up account checks', 'Paste my first post', 'Try samples']) assert.ok(welcome.includes(door), door);
   assert.ok(welcome.indexOf('Set up account checks') < welcome.indexOf('Paste my first post') && welcome.indexOf('Paste my first post') < welcome.indexOf('Try samples'));
   await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
-  assert.ok(page.dialog().includes('Check wording without an account'), 'the old no-account route stays available');
-  await page.ui.handleAction({dataset: {action: 'walk-platform', platform: 'X'}});
-  await page.ui.saveForm({values: {identity: 'https://x.com/river_example'}, reportValidity: () => true, getAttribute: () => 'walk-identity-form', querySelector: () => null});
+  assert.ok(page.dialog().includes('Check wording without an account'), 'the no-account route stays available');
+  assert.ok(page.dialog().includes('Step 1 of 2') && !page.dialog().includes('Bring in my accounts'), 'the first-post route is its own two-step form');
   const saved = {id: 'new-account', platform: 'X', handle: 'river_example', url: 'https://x.com/river_example', display_name: '', identity_mode: 'named', daring: 'careful', sfw_only: true};
-  page.setHandler(url => url === '/api/accounts' ? respond({account: saved}) : respond({...page.data, accounts: [saved]}));
-  await page.ui.saveForm({values: {identity_mode: 'named', daring: 'careful'}, reportValidity: () => true, getAttribute: () => 'walk-boundaries-form', querySelector: () => null});
-  assert.ok(page.dialog().includes('Does this fit the account?'), 'the walk continues to the excerpt check instead of stopping at sign-in');
-  assert.ok(page.dialog().includes('value="new-account" selected'), 'the new account is preselected');
-  assert.ok(!page.dialog().includes('Bring in my accounts'));
-  page.setHandler(url => url === '/api/excerpts' ? respond({review: {id: 'rv1'}, flag_count: 1}) : respond({...page.data, accounts: [saved]}));
-  await page.ui.saveForm({values: {account_id: 'new-account', kind: 'post', text: 'my first post', source_url: '', title: ''}, reportValidity: () => true, getAttribute: () => 'excerpt-form', querySelector: () => null});
+  page.setHandler(url => url === '/api/accounts' ? respond({account: saved}) : url === '/api/excerpts' ? respond({review: {id: 'rv1'}, flag_count: 1}) : respond({...page.data, accounts: [saved]}));
+  await page.ui.saveForm(postForm({text: 'my first post', platform: 'X', identity: 'https://x.com/river_example'}));
+  await page.ui.saveForm(walkForm('walk-boundaries-form', {identity_mode: 'named', daring: 'careful'}));
   assert.equal(page.context.location.hash, '#review', 'after saving the user lands on the actual review');
   assert.equal(page.ui.state.filters.account, 'new-account');
   assert.equal(page.ui.state.filters.status, 'needs_you');
+});
+
+const postForm = values => ({values, reportValidity: () => true, getAttribute: () => 'walk-post-form', querySelector: () => null});
+const walkForm = (id, values) => ({values, reportValidity: () => true, getAttribute: () => id, querySelector: () => null});
+const savedX = {id: 'new-account', platform: 'X', handle: 'river_example', url: 'https://x.com/river_example', display_name: '', identity_mode: 'named', daring: 'careful', sfw_only: true};
+const savedReview = text => ({id: 'rv1', account_id: 'new-account', kind: 'post', title: 'A saved post to review', excerpt: text, source_url: '', severity: 'strength', finding: 'No local boundary rules matched.', suggestion: '', sample_count: 1, origin: 'local', status: 'resolved', reviewed_at: '2026-11-01T10:00:00Z', updated_at: '2026-11-01T10:00:00Z'});
+const firstPostPage = () => { const page = pageFixture(); page.ui.state.data.accounts = []; return page; };
+const errorText = page => page.get('#dialog-error').textContent;
+
+test('first-post form puts the post first, validates text and identity separately and keeps the typed text', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  const html = page.dialog();
+  assert.ok(html.indexOf('Check wording without an account') < html.indexOf('name="text"'), 'the no-account action sits above the form fields');
+  assert.ok(html.indexOf('>Your post<') < html.indexOf('>Platform<') && html.indexOf('>Platform<') < html.indexOf('Your profile link or handle'), 'text is the first field');
+  assert.ok(html.includes('Paste a post, comment, or reply you wrote.') && html.includes('Paste your writing, then choose which account it belongs to. Private messages stay out.'));
+  assert.ok(html.includes('placeholder="@river_example"') && html.includes('This identifies the account. Your post goes in the box above.'));
+  assert.ok(html.includes('Choose a platform') && !html.includes('value="Gmail"') && !html.includes('value="Outlook"'), 'social platforms only, no invented default');
+  assert.ok(html.includes('Optional details') && html.includes('walk-post-url'));
+  assert.ok(!html.includes('Step 1 of 4') && !html.includes('Sign in to'));
+  await page.ui.saveForm(postForm({text: '  \n  ', platform: 'X', identity: '@river_example'}));
+  assert.equal(errorText(page), 'Paste the post you wrote before continuing.');
+  await page.ui.saveForm(postForm({text: 'My words', platform: '', identity: '@river_example'}));
+  assert.equal(errorText(page), 'Choose the platform this post belongs to.');
+  await page.ui.saveForm(postForm({text: 'My words', platform: 'X', identity: ''}));
+  assert.equal(errorText(page), 'Enter your profile link or handle.');
+  await page.ui.saveForm(postForm({text: 'My words', platform: 'X', identity: 'a pasted sentence in the handle box'}));
+  assert.match(errorText(page), /Use a handle without spaces/);
+  assert.equal(page.ui.getWalk().step, 'post', 'a failed step one stays on step one');
+  assert.equal(page.ui.getWalk().text, '', 'a rejected candidate never changes the walk; the open form keeps the typed text');
+  assert.ok(page.dialog().includes('name="text"') && page.dialog() === html, 'the form is not re-rendered, so the typed text stays in the field');
+  assert.equal(page.calls.length, 0, 'validation saves nothing');
+});
+
+test('Next keeps the exact text, Back restores every field, and the review step shows an escaped preview', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  const text = '  Line one\n\nline <b>two</b> & "more"  ';
+  await page.ui.saveForm(postForm({text, platform: 'X', identity: '@river_example', kind: 'comment', title: 'My <label>', source_url: 'https://example.test/p'}));
+  const review = page.dialog();
+  assert.ok(review.includes('Step 2 of 2') && review.includes('Review your first post') && review.includes('X · river_example'));
+  assert.ok(review.includes('Save & check post') && review.includes('walk-boundaries-form'));
+  assert.ok(review.includes('&lt;b&gt;two&lt;/b&gt;') && !review.includes('<b>two</b>'), 'the preview is escaped');
+  assert.ok(!review.includes('Bring in my accounts') && !review.includes('Sign in to') && !review.includes('Step 1 of 4'));
+  assert.ok(review.includes('real name or an alias') && review.includes('How daring') && review.includes('safe for work'), 'the boundary controls stay');
+  assert.equal(page.ui.getWalk().text, text, 'the exact text is held in memory');
+  assert.equal(page.calls.length, 0, 'nothing is saved before the final button');
+  await page.ui.handleAction({dataset: {action: 'walk-back', step: 'post'}});
+  const back = page.dialog();
+  assert.ok(back.includes('Step 1 of 2') && back.includes('&lt;b&gt;two&lt;/b&gt;') && back.includes('value="@river_example"') && back.includes('value="My &lt;label&gt;"'));
+  assert.ok(back.includes('value="X" selected') && back.includes('value="comment" selected') && back.includes('value="https://example.test/p"'));
+  assert.equal(page.ui.getWalk().text, text);
+});
+
+test('Save & check post saves the account once and the retained text once, with the SFW rule intact', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  const text = 'First post <draft>';
+  await page.ui.saveForm(postForm({text, platform: 'X', identity: 'https://x.com/river_example', kind: 'reply', title: 'Label', source_url: ''}));
+  const sent = [];
+  page.setHandler((url, options) => {
+    if (url === '/api/accounts') { sent.push(['account', JSON.parse(options.body)]); return respond({account: savedX}); }
+    if (url === '/api/excerpts') { sent.push(['excerpt', JSON.parse(options.body)]); return respond({review: {id: 'rv1'}, flag_count: 0}); }
+    return respond({...page.data, accounts: [savedX]});
+  });
+  await page.ui.saveForm(walkForm('walk-boundaries-form', {identity_mode: 'named', daring: 'bold'}));
+  assert.deepEqual(sent.map(entry => entry[0]), ['account', 'excerpt']);
+  assert.equal(sent[0][1].sfw_only, true, 'a real-name account is always safe for work, whatever the daring level');
+  assert.equal(sent[0][1].daring, 'bold');
+  assert.equal(sent[0][1].display_name, '');
+  assert.deepEqual(sent[1][1], {account_id: 'new-account', kind: 'reply', text, source_url: '', title: 'Label'});
+  assert.equal(page.context.location.hash, '#review');
+  assert.equal(page.ui.state.filters.account, 'new-account');
+  assert.equal(page.ui.state.filters.status, 'history', 'a clean check lands in History');
+  assert.equal(page.ui.getWalk(), null, 'the temporary draft is cleared after saving');
+  const alias = firstPostPage();
+  await alias.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  await alias.ui.saveForm(postForm({text: 'Alias post', platform: 'X', identity: '@river_example'}));
+  alias.setHandler(url => url === '/api/accounts' ? respond({account: savedX}) : url === '/api/excerpts' ? respond({review: {id: 'rv1'}, flag_count: 0}) : respond({...alias.data, accounts: [savedX]}));
+  await alias.ui.saveForm(walkForm('walk-boundaries-form', {identity_mode: 'alias', daring: 'careful', sfw_only: 'on'}));
+  assert.equal(JSON.parse(alias.calls.find(call => call.url === '/api/accounts').body).sfw_only, true, 'an alias keeps SFW when the box stays checked');
+});
+
+test('a failed post save keeps the text and the saved account, and a retry never saves a second account', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  const text = 'Keep these words';
+  await page.ui.saveForm(postForm({text, platform: 'X', identity: '@river_example'}));
+  const counts = {accounts: 0, excerpts: 0};
+  let reject = true;
+  page.setHandler(url => {
+    if (url === '/api/accounts') { counts.accounts++; return respond({account: savedX}); }
+    if (url === '/api/excerpts') { counts.excerpts++; return reject ? failure(400, 'That text could not be saved.') : respond({review: {id: 'rv1'}, flag_count: 0}); }
+    return respond({...page.data, accounts: [savedX]});
+  });
+  const boundaries = walkForm('walk-boundaries-form', {identity_mode: 'named', daring: 'careful'});
+  await page.ui.saveForm(boundaries);
+  assert.equal(errorText(page), 'That text could not be saved.');
+  assert.equal(page.ui.getWalk().text, text);
+  assert.equal(page.ui.getWalk().saved, 'new-account');
+  reject = false;
+  await page.ui.saveForm(boundaries);
+  assert.deepEqual(counts, {accounts: 1, excerpts: 2}, 'the retry reuses the saved account');
+  assert.equal(page.context.location.hash, '#review');
+});
+
+test('a refresh failure after the post is saved retries only the refresh', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  await page.ui.saveForm(postForm({text: 'Saved once', platform: 'X', identity: '@river_example'}));
+  const counts = {accounts: 0, excerpts: 0};
+  let down = false;
+  page.setHandler(url => {
+    if (url === '/api/accounts') { counts.accounts++; return respond({account: savedX}); }
+    if (url === '/api/excerpts') { counts.excerpts++; down = true; return respond({review: {id: 'rv1'}, flag_count: 0}); }
+    return down ? failure(500, 'The workspace is down.') : respond({...page.data, accounts: [savedX]});
+  });
+  const boundaries = walkForm('walk-boundaries-form', {identity_mode: 'named', daring: 'careful'});
+  await page.ui.saveForm(boundaries);
+  assert.match(errorText(page), /could not refresh[\s\S]*nothing will be saved twice/);
+  assert.equal(page.ui.getWalk().text, 'Saved once');
+  down = false;
+  await page.ui.saveForm(boundaries);
+  assert.deepEqual(counts, {accounts: 1, excerpts: 1}, 'no second account or post');
+  assert.equal(page.context.location.hash, '#review');
+  assert.equal(page.ui.getWalk(), null);
+});
+
+test('a lost response stays uncertain: refreshing never posts again, adopts a record or finishes', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  const text = 'Maybe saved';
+  await page.ui.saveForm(postForm({text, platform: 'X', identity: '@river_example'}));
+  const counts = {excerpts: 0};
+  page.setHandler(url => {
+    if (url === '/api/accounts') return respond({account: savedX});
+    if (url === '/api/excerpts') { counts.excerpts++; throw new Error('socket closed'); }
+    return respond({...page.data, accounts: [savedX], reviews: [savedReview(text)]});
+  });
+  const boundaries = walkForm('walk-boundaries-form', {identity_mode: 'named', daring: 'careful'});
+  await page.ui.saveForm(boundaries);
+  assert.match(errorText(page), /could not confirm whether your post was saved\. Nothing was sent again/);
+  assert.equal(counts.excerpts, 1);
+  assert.equal(page.ui.getWalk().uncertain, 'excerpt');
+  assert.ok(page.dialog().includes('Refresh saved records') && !page.dialog().includes('Continue check') && !page.dialog().includes('Save &amp; check post'));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.ui.saveForm(boundaries);
+    assert.match(errorText(page), /Saved records refreshed; this attempt still cannot be confirmed\. Inspect Accounts and Posts before starting again\./);
+    assert.equal(page.ui.getWalk().uncertain, 'excerpt', 'seeing a similar saved record never clears the uncertainty');
+  }
+  assert.equal(counts.excerpts, 1, 'looking never posts again');
+  assert.equal(page.context.location.hash, '#overview', 'the walk never finishes from a lookalike record');
+  assert.ok(!page.get('#toast').textContent.includes('Nothing matched'));
+  assert.equal(page.ui.getWalk().text, text, 'the exact text stays');
+  page.setHandler(() => { throw new Error('socket closed'); });
+  await page.ui.saveForm(boundaries);
+  assert.match(errorText(page), /still cannot refresh saved records\. Nothing was sent again/);
+  assert.equal(counts.excerpts, 1);
+});
+
+test('a workspace change during Save & check post stops the held draft', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  await page.ui.saveForm(postForm({text: 'Old workspace words', platform: 'X', identity: '@river_example'}));
+  const urls = [];
+  page.setHandler(url => {
+    urls.push(url);
+    if (url === '/api/accounts') { page.ui.resetWorkspaceEditors(); return respond({account: savedX}); }
+    return respond({...page.data, accounts: [savedX]});
+  });
+  await page.ui.saveForm(walkForm('walk-boundaries-form', {identity_mode: 'named', daring: 'careful'}));
+  assert.equal(page.ui.getWalk(), null, 'the draft is gone with the workspace');
+  assert.ok(!urls.includes('/api/excerpts'), 'the stale draft is never posted into the new workspace');
+  assert.equal(page.context.location.hash, '#overview');
+  const sample = firstPostPage();
+  await sample.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  await sample.ui.saveForm(postForm({text: 'Real words', platform: 'X', identity: '@river_example'}));
+  sample.ui.state.data.workspace.mode = 'samples';
+  sample.setHandler(() => { throw new Error('Unexpected request'); });
+  await sample.ui.saveForm(walkForm('walk-boundaries-form', {identity_mode: 'named', daring: 'careful'}));
+  assert.equal(sample.calls.length, 0, 'a draft captured in one workspace is not submitted in another');
+});
+
+test('cancelling the first-post dialog clears the temporary draft', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  await page.ui.saveForm(postForm({text: 'Forget me', platform: 'X', identity: '@river_example'}));
+  assert.equal(page.ui.getWalk().text, 'Forget me');
+  page.ui.resetWorkspaceEditors();
+  assert.equal(page.ui.getWalk(), null);
+  assert.equal([...page.store.values()].some(value => value.includes('Forget me')), false, 'nothing is written to browser storage');
+});
+
+test('Check wording without an account carries the typed text into Compose and saves nothing', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  page.get('#walk-post-text').value = 'Words typed before choosing no account';
+  await page.ui.handleAction({dataset: {action: 'draft-no-account'}});
+  assert.equal(page.ui.state.draft, 'Words typed before choosing no account');
+  assert.equal(page.context.location.hash, '#draft');
+  assert.equal(page.ui.getWalk(), null);
+  assert.equal(page.calls.length, 0, 'no account or review is saved');
+});
+
+const startedWalk = async (page, values = {}) => {
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  await page.ui.saveForm(postForm({text: 'Words that stay', platform: 'X', identity: '@river_example', ...values}));
+};
+const named = walkForm('walk-boundaries-form', {identity_mode: 'named', daring: 'careful'});
+const gate = () => { let release; const promise = new Promise(resolve => { release = resolve; }); return {promise, release}; };
+const toastText = page => page.get('#toast').textContent;
+
+test('Paste my first post is described as pasting writing and then choosing its account', () => {
+  const welcome = firstPostPage().ui.renderWelcome();
+  assert.ok(welcome.includes('Paste your writing, then choose its account.') && !welcome.includes('Save an account, then check something you wrote.'));
+});
+
+test('closing or cancelling while the account is saving stops the post and warns that the save may complete', async () => {
+  for (const cancel of [page => page.ui.handleAction({dataset: {action: 'close-dialog'}}), page => page.ui.cancelFirstPost()]) {
+    const page = firstPostPage();
+    await startedWalk(page);
+    const hold = gate(), urls = [];
+    page.setHandler(async url => { urls.push(url); if (url === '/api/accounts') { await hold.promise; return respond({account: savedX}); } return respond({...page.data, accounts: [savedX]}); });
+    const pending = page.ui.saveForm(named);
+    assert.deepEqual(urls, ['/api/accounts']);
+    await cancel(page);
+    assert.equal(page.ui.getWalk(), null, 'cancellation invalidates the walk at once');
+    assert.match(toastText(page), /already sent may still complete[\s\S]*Refresh Accounts and Posts/);
+    hold.release();
+    await pending;
+    assert.deepEqual(urls, ['/api/accounts'], 'no excerpt POST and no refresh after cancellation');
+    assert.equal(page.context.location.hash, '#overview', 'no success UI after cancellation');
+  }
+  const mid = firstPostPage();
+  await startedWalk(mid);
+  const hold = gate(), urls = [];
+  mid.setHandler(async url => { urls.push(url); if (url === '/api/excerpts') { await hold.promise; return respond({review: {id: 'rv1'}, flag_count: 0}); } return url === '/api/accounts' ? respond({account: savedX}) : respond({...mid.data, accounts: [savedX]}); });
+  const pending = mid.ui.saveForm(named);
+  for (let turn = 0; turn < 200 &&!urls.includes('/api/excerpts'); turn++) await Promise.resolve();
+  assert.ok(urls.includes('/api/excerpts'));
+  mid.ui.cancelFirstPost();
+  hold.release();
+  await pending;
+  assert.equal(urls.filter(url => url === '/api/state').length, 1, 'only the refresh before the post ran');
+  assert.equal(mid.context.location.hash, '#overview');
+  const quiet = firstPostPage();
+  await startedWalk(quiet);
+  quiet.ui.cancelFirstPost();
+  assert.equal(toastText(quiet), '', 'closing before anything was sent adds no warning');
+});
+
+test('Back and the step-one form are ignored while posting, and the continuation sends the frozen text', async () => {
+  const page = firstPostPage();
+  await startedWalk(page, {text: 'Original words'});
+  const hold = gate(), bodies = [];
+  page.setHandler(async (url, options) => {
+    if (url === '/api/accounts') { await hold.promise; return respond({account: savedX}); }
+    if (url === '/api/excerpts') { bodies.push(JSON.parse(options.body)); return respond({review: {id: 'rv1'}, flag_count: 0}); }
+    return respond({...page.data, accounts: [savedX]});
+  });
+  const pending = page.ui.saveForm(named);
+  await page.ui.handleAction({dataset: {action: 'walk-back', step: 'post'}});
+  await page.ui.handleAction({dataset: {action: 'walk-platform', platform: 'YouTube'}});
+  await page.ui.handleAction({dataset: {action: 'draft-no-account'}});
+  await page.ui.saveForm(postForm({text: 'Changed while posting', platform: 'X', identity: '@river_example'}));
+  await page.ui.saveForm(named);
+  assert.equal(page.ui.getWalk().step, 'boundaries');
+  assert.equal(page.ui.getWalk().text, 'Original words');
+  assert.ok(page.dialog().includes('disabled') && page.dialog().includes('Saving'), 'the button cannot double-submit');
+  hold.release();
+  await pending;
+  assert.deepEqual(bodies, [{account_id: 'new-account', kind: 'post', text: 'Original words', source_url: '', title: ''}]);
+  assert.equal(page.calls.filter(call => call.url === '/api/accounts').length, 1, 'a double submit saved one account');
+});
+
+test('after a partial save the walk is recovery-only: frozen post, no edits, no second account', async () => {
+  const page = firstPostPage();
+  await startedWalk(page, {text: 'Exact <text>\n  with spacing  ', kind: 'comment', title: 'T', source_url: 'https://example.test/p'});
+  let reject = true;
+  const bodies = {accounts: [], excerpts: []};
+  page.setHandler((url, options) => {
+    if (url === '/api/accounts') { bodies.accounts.push(JSON.parse(options.body)); return respond({account: savedX}); }
+    if (url === '/api/excerpts') { bodies.excerpts.push(JSON.parse(options.body)); return reject ? failure(400, 'That text could not be saved.') : respond({review: {id: 'rv1'}, flag_count: 0}); }
+    return respond({...page.data, accounts: [savedX]});
+  });
+  await page.ui.saveForm(named);
+  assert.equal(errorText(page), 'That text could not be saved.');
+  const html = page.dialog();
+  assert.ok(html.includes('Continue check') && html.includes('Exact &lt;text&gt;') && html.includes('Your account is saved. Your post is not saved yet.'));
+  for (const gone of ['data-action="walk-back"', 'Change this', 'name="text"', 'name="identity_mode"', 'name="daring"', 'name="sfw_only"', 'draft-no-account', 'walk-post-form']) assert.ok(!html.includes(gone), gone);
+  assert.ok(html.includes('data-action="close-dialog"') && html.includes('does not undo anything'));
+  await page.ui.handleAction({dataset: {action: 'walk-back', step: 'post'}});
+  await page.ui.saveForm(walkForm('walk-boundaries-form', {identity_mode: 'alias', daring: 'bold'}));
+  assert.equal(page.ui.getWalk().step, 'boundaries');
+  reject = false;
+  await page.ui.saveForm(walkForm('walk-boundaries-form', {identity_mode: 'alias', daring: 'bold'}));
+  assert.equal(bodies.accounts.length, 1);
+  assert.equal(bodies.accounts[0].identity_mode, 'named');
+  assert.equal(bodies.accounts[0].daring, 'careful');
+  assert.equal(bodies.excerpts.length, 3);
+  for (const body of bodies.excerpts) assert.deepEqual(body, {account_id: 'new-account', kind: 'comment', text: 'Exact <text>\n  with spacing  ', source_url: 'https://example.test/p', title: 'T'});
+  assert.equal(page.context.location.hash, '#review');
+  assert.equal(page.ui.getWalk(), null);
+});
+
+test('a saved post whose refresh failed is refresh-only and cannot discard or replace the text', async () => {
+  const page = firstPostPage();
+  await startedWalk(page, {text: 'Saved text'});
+  const counts = {accounts: 0, excerpts: 0};
+  let down = false;
+  page.setHandler(url => {
+    if (url === '/api/accounts') { counts.accounts++; return respond({account: savedX}); }
+    if (url === '/api/excerpts') { counts.excerpts++; down = true; return respond({review: {id: 'rv1'}, flag_count: 2}); }
+    return down ? failure(500, 'The workspace is down.') : respond({...page.data, accounts: [savedX]});
+  });
+  await page.ui.saveForm(named);
+  const html = page.dialog();
+  assert.ok(html.includes('Refresh saved records') && !html.includes('Continue check') && !html.includes('walk-back') && !html.includes('name="text"') && html.includes('Saved text'));
+  await page.ui.handleAction({dataset: {action: 'walk-back', step: 'post'}});
+  await page.ui.saveForm(postForm({text: 'Replacement text', platform: 'X', identity: '@river_example'}));
+  assert.equal(page.ui.getWalk().text, 'Saved text');
+  assert.equal(page.ui.getWalk().attempt.excerpt.text, 'Saved text');
+  down = false;
+  await page.ui.saveForm(named);
+  assert.deepEqual(counts, {accounts: 1, excerpts: 1});
+  assert.equal(page.ui.state.filters.status, 'needs_you');
+  assert.match(toastText(page), /Post checked\. 2 possible boundary issues/);
+});
+
+test('a repeated platform or handle change cannot alter the saved account identity', async () => {
+  const page = firstPostPage();
+  await startedWalk(page);
+  const bodies = [];
+  let reject = true;
+  page.setHandler((url, options) => {
+    if (url === '/api/accounts') return respond({account: savedX});
+    if (url === '/api/excerpts') { bodies.push(JSON.parse(options.body)); return reject ? failure(400, 'Try again.') : respond({review: {id: 'rv1'}, flag_count: 0}); }
+    return respond({...page.data, accounts: [savedX]});
+  });
+  await page.ui.saveForm(named);
+  for (let attempt = 0; attempt < 3; attempt++) await page.ui.saveForm(postForm({text: 'YouTube words', platform: 'YouTube', identity: '@river_example'}));
+  await page.ui.saveForm(postForm({text: 'Other words', platform: 'X', identity: '@someone_else'}));
+  assert.equal(page.ui.getWalk().platform, 'X');
+  assert.equal(page.ui.getWalk().handle, 'river_example');
+  assert.equal(page.ui.getWalk().text, 'Words that stay');
+  reject = false;
+  await page.ui.saveForm(named);
+  assert.ok(bodies.every(body => body.text === 'Words that stay' && body.account_id === 'new-account'));
+  assert.equal(page.calls.filter(call => call.url === '/api/accounts').length, 1);
+});
+
+test('an unrelated account or review is never adopted after a lost response', async () => {
+  const page = firstPostPage();
+  await startedWalk(page);
+  const counts = {accounts: 0, excerpts: 0};
+  const lookalike = {...savedX, id: 'other-account', sfw_only: false, daring: 'bold', url: 'https://x.com/someone'};
+  page.setHandler(url => {
+    if (url === '/api/accounts') { counts.accounts++; throw new Error('socket closed'); }
+    if (url === '/api/excerpts') { counts.excerpts++; return respond({review: {id: 'rv1'}, flag_count: 0}); }
+    return respond({...page.data, accounts: [lookalike], reviews: [{...savedReview('Words that stay'), account_id: 'other-account', source_url: 'https://example.test/else', origin: 'assistant'}]});
+  });
+  await page.ui.saveForm(named);
+  assert.match(errorText(page), /could not confirm whether the account was saved/);
+  assert.equal(page.ui.getWalk().uncertain, 'account');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.ui.saveForm(named);
+    assert.match(errorText(page), /Saved records refreshed; this attempt still cannot be confirmed/);
+    assert.ok(!/was not saved|nothing was saved|not in the saved results/i.test(errorText(page)), 'absence is never claimed to prove anything');
+  }
+  assert.equal(page.ui.getWalk().saved, null, 'no id is chosen from similar records');
+  assert.deepEqual(counts, {accounts: 1, excerpts: 0});
+  assert.equal(page.context.location.hash, '#overview');
+  assert.ok(page.dialog().includes('Refresh saved records'));
+});
+
+test('recovered or unknown results never claim a clean check', async () => {
+  const lost = firstPostPage();
+  await startedWalk(lost);
+  lost.setHandler(url => {
+    if (url === '/api/accounts') return respond({account: savedX});
+    if (url === '/api/excerpts') throw new Error('socket closed');
+    return respond({...lost.data, accounts: [savedX], reviews: [{...savedReview('Words that stay'), severity: 'concern', status: 'needs_you'}]});
+  });
+  await lost.ui.saveForm(named);
+  await lost.ui.saveForm(named);
+  assert.ok(!/Nothing matched|History/.test(toastText(lost)));
+  assert.equal(lost.ui.getWalk().uncertain, 'excerpt');
+  const unknown = firstPostPage();
+  await startedWalk(unknown);
+  unknown.setHandler(url => url === '/api/accounts' ? respond({account: savedX}) : url === '/api/excerpts' ? respond({review: {id: 'rv1'}}) : respond({...unknown.data, accounts: [savedX]}));
+  await unknown.ui.saveForm(named);
+  assert.ok(!/Nothing matched/.test(toastText(unknown)) && toastText(unknown).includes('Post saved and checked'));
+  assert.equal(unknown.ui.state.filters.status, 'all');
+});
+
+test('an incomplete excerpt confirmation stays uncertain and can only refresh', async () => {
+  for (const response of [null, {}, {flag_count: 0}, {review: {}}, {review: {id: ''}, flag_count: 0}, {review: {id: 42}, flag_count: 0}]) {
+    const page = firstPostPage();
+    await startedWalk(page);
+    let excerpts = 0;
+    page.setHandler(url => {
+      if (url === '/api/accounts') return respond({account: savedX});
+      if (url === '/api/excerpts') { excerpts++; return respond(response); }
+      return respond({...page.data, accounts: [savedX]});
+    });
+    await page.ui.saveForm(named);
+    const walk = page.ui.getWalk();
+    assert.equal(walk.uncertain, 'excerpt');
+    assert.ok(!walk.excerptSaved);
+    assert.equal(walk.attempt.excerpt.text, 'Words that stay');
+    assert.match(page.dialog(), /Refresh saved records/);
+    for (let retry = 0; retry < 2; retry++) await page.ui.saveForm(named);
+    assert.equal(excerpts, 1, 'refresh must never send the unconfirmed excerpt again');
+    assert.equal(page.ui.getWalk(), walk);
+    assert.equal(page.context.location.hash, '#overview');
+    assert.ok(!/Nothing matched|Post saved|Post checked/.test(toastText(page)));
+  }
+});
+
+test('a delayed close event cannot cancel a reopened first-post dialog', async () => {
+  const page = firstPostPage();
+  await startedWalk(page);
+  await page.ui.handleAction({dataset: {action: 'close-dialog'}});
+  assert.equal(page.ui.getWalk(), null);
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  const fresh = page.ui.getWalk();
+  assert.equal(page.get('#dialog').open, true);
+  page.get('#dialog').dispatchEvent({type: 'close'});
+  assert.equal(page.ui.getWalk(), fresh, 'the previous dialog close must not touch this walk');
+  await page.ui.saveForm(postForm({text: 'A new draft', platform: 'X', identity: '@river_example'}));
+  assert.equal(fresh.step, 'boundaries');
+  page.get('#dialog').dispatchEvent({type: 'cancel'});
+  assert.equal(page.ui.getWalk(), null, 'the real current cancel listener still clears the walk');
+});
+
+test('a changed workspace token in the same mode stops the continuation before any post', async () => {
+  const page = firstPostPage();
+  await startedWalk(page);
+  const urls = [];
+  page.setHandler(url => {
+    urls.push(url);
+    if (url === '/api/accounts') { page.ui.state.data = {...page.ui.state.data, workspace: {token: 'workspace-two', mode: 'live'}}; return respond({account: savedX}); }
+    return respond({...page.data, workspace: {token: 'workspace-two', mode: 'live'}, accounts: [savedX]});
+  });
+  await page.ui.saveForm(named);
+  assert.ok(!urls.includes('/api/excerpts'), 'the stale draft is never posted into another workspace');
+  assert.ok(!urls.includes('/api/state'));
+  assert.equal(page.context.location.hash, '#overview');
+});
+
+test('with saved accounts Paste my first post is a plain Check a post form', async () => {
+  const page = pageFixture();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  const html = page.dialog();
+  assert.ok(html.includes('Check a post') && html.includes('>Your post<') && html.includes('excerpt-form') && !html.includes('walk-post-form'));
+  assert.ok(html.includes('name="source_url"') && html.includes('name="title"') && html.includes('name="kind"'));
+  page.setHandler(url => url === '/api/excerpts' ? respond({review: {id: 'rv1'}, flag_count: 0}) : respond({...page.data}));
+  await page.ui.saveForm({values: {account_id: 'ax', kind: 'post', text: 'Exact text', source_url: '', title: ''}, reportValidity: () => true, getAttribute: () => 'excerpt-form', querySelector: () => null});
+  assert.deepEqual(JSON.parse(page.calls.find(call => call.url === '/api/excerpts').body), {account_id: 'ax', kind: 'post', text: 'Exact text', source_url: '', title: ''});
+});
+
+test('Today puts Paste text first when the reader is absent, incompatible or missing, and keeps one Check now', () => {
+  const absent = pageFixture();
+  absent.ui.readerSetupDialog();
+  absent.fire(1500);
+  const quiet = absent.ui.readerTodayContent();
+  assert.equal((quiet.match(/id="res-check-now"/g) || []).length, 1);
+  assert.match(quiet, /id="res-check-now" class="button quiet" data-action="reader-check-all" disabled/);
+  assert.ok(quiet.includes('Set up account checks') && quiet.includes('Account checks are not set up in this browser'));
+  assert.match(quiet, /class="button primary" data-action="add-excerpt">Paste text/);
+  assert.ok(quiet.indexOf('Paste text') < quiet.indexOf('id="res-check-now"'));
+  const mismatch = pageFixture();
+  mismatch.ui.readerClient.handle('setup', {version: '0.0.6', protocol: 1, x: true, youtube: true});
+  assert.match(mismatch.ui.readerTodayContent(), /id="res-check-now" class="button quiet" data-action="reader-check-all" disabled/);
+  const bare = pageFixture({noReader: true});
+  assert.match(bare.ui.readerTodayContent(), /id="res-check-now" class="button quiet" data-action="reader-check-all" disabled/);
+  const ready = pageFixture();
+  ready.ui.readerClient.handle('setup', {version: '0.1.0', protocol: 1, x: true, youtube: true});
+  const live = ready.ui.readerTodayContent();
+  assert.match(live, /id="res-check-now" class="button primary" data-action="reader-check-all" >/);
+  assert.match(live, /class="button quiet" data-action="add-excerpt">Paste text/);
+  const looking = pageFixture();
+  assert.match(looking.ui.readerTodayContent(), /id="res-check-now" class="button primary" data-action="reader-check-all"/, 'a first look that has not finished does not demote the button');
 });
 
 test('receipts and findings escape every character and navigate to the account review', async () => {

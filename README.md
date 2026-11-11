@@ -2,7 +2,7 @@
 
 **See what you have said online and how it may land. Fix it in your own voice. Privately, on your own computer.**
 
-`0.1.0-preview.7 · source preview`
+`0.1.0-preview.8 · source preview`
 
 Resonance is a small app that runs on your own computer. It gathers your own posts, comments and replies into one place, marks the exact words that may land badly with the audience of that account, and helps you keep, change or remove each one. It has no account to create, no cloud behind it and no tracking inside it.
 
@@ -28,7 +28,7 @@ Your browser opens Resonance at `http://127.0.0.1:4317`. Leave the terminal wind
 Resonance opens on a Welcome page with three doors.
 
 1. **Set up account checks.** Check whether the separate reader is available in this browser. Supported account discovery asks you to confirm an account and its boundaries before saving it. Until the reader has a store listing, setup explains that limit and offers manual account addition.
-2. **Paste my first post.** Add an account, choose its boundaries, paste your writing and continue directly to the resulting review. Your passwords stay in your browser.
+2. **Paste my first post.** A two-step form. Step 1: paste your post, choose the platform and enter your profile link or handle (or choose Check wording without an account to use Compose instead). Step 2: choose how you want to show up (real name or alias, how daring) and select Save & check post. That saves the account and the post on this computer, then opens the saved result with Keep, Modify and Delete beside the post. Nothing is posted or changed on the platform, and Resonance never sees your passwords. If a save cannot be confirmed, Resonance offers a refresh without sending it again. Inspect your saved accounts and posts before starting another attempt.
 3. **Try samples.** The samples live in their own file, apart from anything of yours, under a banner that says so. **Clear samples** removes them. Samples never read a real account.
 
 ## How your posts get in

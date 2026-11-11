@@ -389,3 +389,5 @@ main{max-width:1680px;padding:22px 24px 32px}.workspace-footer{max-width:1680px;
 .reader-discovery-card p{margin:4px 0}
 @media(max-width:520px){.reader-controls .button{flex:1 1 100%;justify-content:center}.reader-today{padding:16px}}
 .inbox-card{padding:16px 18px;border:1px solid var(--line);background:var(--panel);border-radius:2px;min-width:0}.inbox-card .review-excerpt{margin:12px 0 0}.inbox-note{font-size:12px;line-height:1.65;color:var(--dim);margin:8px 0 0;overflow-wrap:anywhere}.inbox-detail{margin-top:10px}.inbox-detail p{font-size:12px;line-height:1.65;color:var(--muted);margin:4px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}.inbox-links{display:flex;flex-wrap:wrap;gap:4px 16px}.inbox-links .source-link,.inbox-links .sample-link-note{margin-top:0}
+.walk-post-text{min-height:200px;width:100%}.walk-post-preview{max-height:160px;overflow:auto;white-space:pre-wrap}
+.today-kept{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;margin:0 0 16px;font:12px var(--mono)}.today-kept .text-button{min-height:44px}
