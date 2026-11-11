@@ -231,8 +231,10 @@ class SampleWorkspaceTests(unittest.TestCase):
             worker.start()
             self.assertFalse(done.wait(0.15), 'The sample switch passed a held CLI lock.')
             child.communicate('\n', timeout=5)
-            worker.join(5)
-            self.assertTrue(done.is_set())
+            # Sample seeding writes many records and can be slow on Windows CI.
+            # The held-lock assertion above tests serialization, not disk speed.
+            worker.join(30)
+            self.assertTrue(done.is_set(), 'Sample startup did not finish within 30 seconds after unlock.')
             self.assertEqual(errors, [])
             self.assertEqual(child.returncode, 0)
             self.assertEqual(self.workspace.context()['mode'], 'samples')
@@ -241,7 +243,7 @@ class SampleWorkspaceTests(unittest.TestCase):
                 child.kill()
                 child.communicate(timeout=5)
             if worker.ident is not None:
-                worker.join(5)
+                worker.join(30)
 
     def test_read_only_guard_leaves_entire_folder_unchanged_with_or_without_lock(self):
         def snapshot(folder):

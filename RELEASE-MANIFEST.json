@@ -582,8 +582,8 @@
       "bytes": 41603
     },
     "tests/test_samples.py": {
-      "sha256": "2512b680c4b9329da95e676181a06c2610aea4d2a65a2b408437ee83004da64f",
-      "bytes": 14667
+      "sha256": "c83c0d8de97d531a8134223181fb434da19a5341d41da29f4a235b0dc4a1517d",
+      "bytes": 14895
     },
     "tests/test_server.py": {
       "sha256": "795c19d4e551624cb612a6c5b46f4f7e8e0869ed508b306964e1bd50311c089d",
