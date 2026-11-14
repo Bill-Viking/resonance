@@ -2,13 +2,13 @@
 
 **See what you have said online and how it may land. Fix it in your own voice. Privately, on your own computer.**
 
-`0.1.0-preview.8 · source preview`
+`0.1.0-rc.1 · unreleased consumer candidate`
 
-Resonance is a small app that runs on your own computer. It gathers your own posts, comments and replies into one place, marks the exact words that may land badly with the audience of that account, and helps you keep, change or remove each one. It has no account to create, no cloud behind it and no tracking inside it.
+Resonance is a free, open-source app under the [MIT license](LICENSE) that runs on your own computer. It gathers your own posts, comments and replies into one place, marks the exact words that may land badly with the audience of that account, and helps you keep, change or remove each one. It has no account to create, no cloud behind it and no tracking inside it.
 
-This source preview includes desktop build tooling and the source edition. A packaged desktop app opens without a separate Python installation. Desktop candidates are unsigned; installer distribution and fresh-user verification are still pending. The source edition below requires Python. See [desktop builds and use](docs/DESKTOP.md).
+This unreleased candidate includes desktop build tooling and the source edition. A packaged desktop app opens without a separate Python installation. Desktop candidates are unsigned; installer distribution and fresh-user verification are still pending. The source edition below requires Python. See [desktop builds and use](docs/DESKTOP.md).
 
-**The browser reader is a preview, not available in a store yet.** The candidate includes account discovery, Check now, saved receipts and text history for at most three own X posts or YouTube comments per account. It requires the separate reader in the same browser and explicit site permission. Ordinary store installation is still a release gate. Paste text, use samples or have your external assistant bring in your posts in the meantime. Other saved platforms, including Instagram and Substack, use those routes. See [the release notes](CHANGELOG.md).
+**The browser reader is a preview, not available in a store yet.** The candidate includes account discovery, Check now, saved receipts and text history for up to three recent own X main-timeline posts (not replies to other people) or YouTube comments per account. It requires the separate reader in the same browser and explicit site permission. Ordinary store installation is still a release gate. Paste text, use samples or have your external assistant bring in your posts in the meantime. Other saved platforms, including Instagram and Substack, use those routes. The current YouTube reader requires an English-language interface; opening comment videos may affect watch history or start playback before pausing. See [reader privacy](docs/READER-PRIVACY.md) and [the release notes](CHANGELOG.md).
 
 ## Start from source
 
@@ -25,18 +25,45 @@ Your browser opens Resonance at `http://127.0.0.1:4317`. Leave the terminal wind
 
 ## First run
 
-Resonance opens on a Welcome page with three doors.
+Welcome starts with **Paste my first post**. Paste your writing, choose the platform and enter your profile link or handle. You can choose **Check wording without an account** to use Compose instead. The next step asks how you want to show up (real name or alias, how daring). **Save & check post** saves the account and post on this computer, then opens the result with Keep, Modify and Delete. Nothing is posted or changed on the platform. If a save cannot be confirmed, refresh checks its status without sending it again. Inspect your saved accounts and posts before starting another attempt.
 
-1. **Set up account checks.** Check whether the separate reader is available in this browser. Supported account discovery asks you to confirm an account and its boundaries before saving it. Until the reader has a store listing, setup explains that limit and offers manual account addition.
-2. **Paste my first post.** A two-step form. Step 1: paste your post, choose the platform and enter your profile link or handle (or choose Check wording without an account to use Compose instead). Step 2: choose how you want to show up (real name or alias, how daring) and select Save & check post. That saves the account and the post on this computer, then opens the saved result with Keep, Modify and Delete beside the post. Nothing is posted or changed on the platform, and Resonance never sees your passwords. If a save cannot be confirmed, Resonance offers a refresh without sending it again. Inspect your saved accounts and posts before starting another attempt.
-3. **Try samples.** The samples live in their own file, apart from anything of yours, under a banner that says so. **Clear samples** removes them. Samples never read a real account.
+**Other ways to start** offers samples, browser-reader setup and your own assistant. Samples live in their own file, apart from anything of yours, under a banner that says so. **Clear samples** removes them. Samples never read a real account. Reader setup explains the pending store-installation limit and asks you to confirm any discovered account and its boundaries before saving it.
+
+**Today, Posts and Compose** are the main tabs. Accounts, Mail, Check history and Settings & data remain visible in a quieter row. Today shows what needs your decision, the next action and saved work that has content. Empty work panels stay out of the way; the counts remain visible. Check now depends on the separate reader and supported accounts. Otherwise, Paste a post is the starting action. A zero count describes the saved records, not your whole online account.
+
+**Choose a review** on Welcome and Today opens four choices:
+
+- **Work Safe** reviews public writing and attachments against account boundaries.
+- **Privacy Check** looks for exposed personal details and confidential work information.
+- **Voice & Tone** reviews how wording may land while preserving intent and voice.
+- **Before You Post** opens Compose for a local draft wording check.
+
+The first three prepare a request to copy into your own AI assistant's chat.
+Choose one social account or all saved social accounts, then the 25 newest
+public items per account or all accessible public posts, comments and replies.
+Preparing or copying the request starts nothing and authorizes no platform
+changes. Mail and private messages are excluded. Leave samples before preparing
+a real-account review. Before You Post preserves your current in-tab draft.
 
 ## How your posts get in
 
 - **Paste them.** Always available, no assistant needed.
 - **Check now with the preview reader.** After setup, a deliberate click reads supported own text, saves a dated receipt with coverage gaps and makes local rule matches available for review. **See what was read** shows the exact saved text, including text with no matches. A saved account is not a current sign-in check. The reader never publishes, edits or deletes.
-- **Your assistant brings them.** If you use an AI assistant that can drive a browser and run a command, give it one sentence — *"Read ASSISTANT.md in my Resonance folder and run my Resonance check."* — and it does the rest: it reads your own posts where you are signed in, saves what it found, and your tiles fill in. [ASSISTANT.md](ASSISTANT.md) is the whole contract it follows, written to be read by you too. The short version: your own writing only, never private messages, and nothing on a platform is changed without your yes, at that moment, for that item.
-- **Your own data archive.** Importing a platform's "download your data" file is coming next.
+- **Your assistant brings them.** If you use an AI assistant that can drive a browser and run a command, give it one sentence — *"Read ASSISTANT.md in my Resonance folder and run my Resonance check."* — and it does the rest: it reads your own posts where you are signed in, saves what it found, and your tiles fill in. [ASSISTANT.md](ASSISTANT.md) is the whole contract it follows, written to be read by you too. The short version: your own writing only, never private messages, and nothing on a platform is changed without current user authorization. Permanent deletion always needs your current yes for that exact item. Only an explicit Work Safe delegation may cover recoverable removal or its specified fallback edit within a defined scope, where the tool permits preauthorization; every tool-required confirmation still applies.
+  Facebook checks that include comments or replies start from your own Comments
+  activity log. The assistant collects the loaded rows into a private navigation
+  inventory, including replies on other people's posts, then checks their exact
+  sources. You do not need to supply names, topics or links. Missing rows and
+  unfinished loading stay visible as coverage gaps. This is an
+  [assistant-led discovery workflow](docs/FACEBOOK-DISCOVERY.md), not background
+  monitoring or Facebook support in the preview browser extension.
+- **Ask for a Work Safe audit.** Tell your assistant, “Run a Work Safe audit on [platform/account] for [scope].” “Safe Work” means the same thing. It follows the same contract and report, and checks only the public writing and attachments it can actually inspect. The request does not authorize a platform change. See the [procedure](docs/SAFE-WORK.md) and the packaged [Work Safe skill](skills/res-work-safe/SKILL.md).
+  Coverage distinguishes your posts from your comments and replies on other
+  people's posts. The skill's local completion checker holds the audit partial
+  while recorded targets, requested surfaces or action results remain unresolved.
+  It checks the assistant's record; it cannot discover omitted content or prove
+  what happened on a platform.
+- **Your own data archive.** Importing a platform's "download your data" file is not available in this edition.
 
 - **Comments addressed to RES.** If you leave a public comment or reply that starts with `RES:`, `Hey RES,` or `@RES`, your assistant can bring it in as a request for an evaluation and a proposed edit or follow-up. Resonance does not watch your accounts and reacts to nothing instantly: it appears under **RES requests** on Today only after your assistant has checked and imported it. Being addressed to RES grants no access and starts nothing. You review it, and anything posted, edited or removed still needs its own separate yes.
 
@@ -61,12 +88,11 @@ Before an assistant edit or removal starts, a fresh account check must match the
 Edit availability is checked for each exact post. Cards show the assistant’s dated observation and reason; unknown stays unknown. Assistant edits require fresh available text-edit controls as well as the account match. When editing is unavailable, Res offers Keep, a follow-up reply draft or a separate-post draft. These drafts stay in the current tab for copying and separate review; Res does not publish them or remove the original.
 
 For public writing or artwork you separately ask an assistant to create through
-Resonance, [the authoring workflow](AUTHORING.md) uses RES public credit: a two-line
-text signature with the repository URL for standalone creations, a compact
-signature for short replies, and no added branding when you ask to omit it.
-It keeps internal session labels out of public signatures. Graphic banners are
-used only when requested. This is an assistant workflow, not an automatic
-signature in the app or permission to publish.
+Resonance, [the authoring workflow](AUTHORING.md) starts with no RES signature or
+banner. From **Settings & data**, open **Preferences: personal brand and RES credit**. Under **RES credit on public drafts**, you can opt into a
+short or full signature and independently request your approved banner. Your
+instruction for a particular item takes priority. These settings guide your
+external assistant; the app does not add anything to saved text or publish it.
 
 ## Accounts and boundaries
 
@@ -86,7 +112,7 @@ Resonance prints the folder it is using when it starts, and **Settings → Your 
 
 **Upgrades protect your data.** Before a new version changes the database it saves a copy under `backups/auto` in the data folder. It keeps up to five copies, preserving the original state for the whole upgrade alongside its newest step backups. If a step fails, its copy is put back and Resonance tells you in one sentence.
 
-**Keeping a copy is your choice.** Nothing leaves the folder automatically, and **Export backup** writes a file whenever you ask. Exports are readable JSON, including account names, saved text, context images, drafts, requests and RES-addressed comments. This edition does not encrypt exported backups; keep them in a private location or encrypt them with your own trusted tool. A restored backup never carries permission to change anything; pending requests ask for your yes again.
+**Keeping a copy is your choice.** Nothing leaves the folder automatically, and **Export backup** writes a file whenever you ask. Exports are readable JSON, including account names, saved text, context images, drafts, requests and RES-addressed comments. This edition does not encrypt exported backups; keep them in a private location or encrypt them with your own trusted tool. Restoring a backup applies its saved branding choices; the import preview shows any change before you confirm. An upgraded workspace requires this edition or newer. New backups use format 4 and older editions reject them. A restored backup never carries permission to change anything; pending requests ask for your yes again.
 
 ## What it does not do
 
@@ -107,6 +133,10 @@ python3 -m unittest discover -s tests
 node tests/test_ui_actions.cjs
 node tests/test_ui_communication.cjs
 node tests/test_ui_today.cjs
+node tests/test_ui_reader.cjs
+node tests/test_browser_reader.cjs
+node tests/test_reader_discovery.cjs
+node tests/test_reader_pipeline.cjs
 ```
 
 Run `python3 server.py --open` from this folder, with `RESONANCE_DATA_DIR` set to a temporary folder so your own data is never touched. The Node suites check views and handlers against a mock page; they do not replace a look in a real browser.

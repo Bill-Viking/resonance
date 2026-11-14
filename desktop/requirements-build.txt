@@ -1,5 +1,4 @@
-# Build tools for the self-contained desktop candidate. Not needed to run Resonance
-# from source and never installed on a person's computer. Install these into the
-# Python 3.11 (with Tk, such as python.org's) that runs tools/build_desktop.py.
+# Direct desktop build dependencies. Use tools/prepare_build.py to install
+# these and their transitives from the wheel locks selected by build-targets.json.
 pyinstaller==6.22.3
 tzdata==2026.2

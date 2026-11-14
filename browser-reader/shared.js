@@ -335,7 +335,7 @@
           new Set(items.map(item => item.url)).size !== items.length || total > LIMITS.totalBytes) return false;
       return exactShape(coverage, ["limit", "accepted", "examined", "skipped", "more_available", "partial", "notes"]) &&
         coverage.limit === LIMITS.items && coverage.accepted === items.length &&
-        Number.isInteger(coverage.examined) && coverage.examined >= 0 && coverage.examined <= 64 &&
+        Number.isInteger(coverage.examined) && coverage.accepted <= coverage.examined && coverage.examined <= 64 &&
         typeof coverage.more_available === "boolean" && typeof coverage.partial === "boolean" &&
         Array.isArray(coverage.skipped) && coverage.skipped.length <= 16 &&
         coverage.skipped.every(row => exactShape(row, ["reason", "count"]) && TOKEN.test(row.reason) &&
@@ -570,12 +570,14 @@
     const heading = Array.from(doc.querySelectorAll('h1, h2, h3, [role="heading"]'))
       .some(node => exactText(node).trim() === "Your YouTube Comments");
     if (!heading) return { state: "pending" };
-    const rows = Array.from(doc.querySelectorAll('[role="listitem"]'));
-    if (rows.length === 0) return { state: "pending" };
+    const found = Array.from(doc.querySelectorAll('[role="listitem"]'));
+    if (found.length === 0) return { state: "pending" };
+    // At most 64 rows are examined; the rest are reported as more available, never silently counted.
+    const rows = found.slice(0, 64);
     const counts = {};
     const candidates = [];
     const seen = new Set();
-    let more = false;
+    let more = found.length > rows.length;
     for (const row of rows) {
       const links = new Map();
       for (const link of Array.from(row.querySelectorAll("a[href]"))) {

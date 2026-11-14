@@ -601,6 +601,30 @@ class ReadTests(Rig):
         self.assertNotIn('current_revision', encoded)
         self.assertLess(len(json.dumps(summary)), 40000)
 
+    def test_summaries_order_by_completion_time_not_by_save_or_restore_order(self):
+        base = server.Store(self.directory).backup()  # Accounts only.
+        other = samples.Workspace(Path(self.temp.name) / 'later', server.Store)
+        token = other.context()['token']
+        other.mutate('POST', '/api/import', copy.deepcopy(base), token)
+        self.save((self.x, 'ok', x_ok([x_item('Older note', '6001')])))
+        older = server.Store(self.directory).backup()
+        time.sleep(1.1)  # Completion times are whole seconds.
+        job = other.mutate('POST', '/api/checks/begin', {'account_ids': [self.x['id']]}, token)[1]
+        body = {'check_id': job['check_id'], 'reader_version': '0.1.0', 'completed_at': stamp(),
+                'accounts': [row(self.x, 'ok', x_ok([x_item('Newer note', '6002')]))]}
+        other.mutate('POST', '/api/checks', body, token)
+        other.mutate('POST', '/api/import', copy.deepcopy(older), token)  # The older receipt arrives last.
+        recent = other.state()['reader_check_summary']['recent']
+        self.assertEqual([r['origin'] for r in recent], ['live', 'historical'])
+        self.assertGreater(recent[0]['completed_at'], recent[1]['completed_at'])
+        self.assertEqual(recent[1]['id'], older['reader_checks'][0]['id'])
+
+    def test_summary_order_tolerates_different_zone_spellings(self):
+        order = reader_checks.completed_order
+        self.assertLess(order('2026-01-01T10:00:00+02:00'), order('2026-01-01T09:00:00Z'))
+        self.assertLess(order('2026-01-01T08:59:59.5Z'), order('2026-01-01T09:00:00+00:00'))
+        self.assertLess(order('garbled'), order('2020-01-01T00:00:00Z'))
+
     def test_unknown_check_is_not_found(self):
         with self.assertRaises(LookupError):
             self.ws.read_check(uuid.uuid4().hex, self.token)
@@ -622,9 +646,9 @@ class BackupTests(Rig):
         with store.connect() as db:
             return [json.loads(r['data']) for r in db.execute(f'SELECT data FROM {name} ORDER BY id')]
 
-    def test_format_three_round_trips_with_historical_receipts(self):
+    def test_current_format_round_trips_with_historical_receipts(self):
         backup = self.history()
-        self.assertEqual(backup['schema_version'], 3)
+        self.assertEqual(backup['schema_version'], 4)
         self.assertEqual((len(backup['reader_checks']), len(backup['reader_sources']), len(backup['reader_revisions'])), (2, 3, 4))
         self.assertNotIn('reader_check_summary', backup)
         other = self.fresh()

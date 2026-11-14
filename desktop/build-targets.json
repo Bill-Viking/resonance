@@ -1,0 +1,39 @@
+{
+  "python": "3.14.10",
+  "bootstrap": {
+    "file": "locks/bootstrap.txt",
+    "sha256": "2ec3675fc6ae15e1653f0239e56650ac7ceeafb1677eca82c6491259d1883197"
+  },
+  "targets": {
+    "macos-arm64": {
+      "os": "macOS",
+      "platform": "darwin",
+      "architecture": "arm64",
+      "minimum_os": "13.0",
+      "lock": {
+        "file": "locks/macos-universal2.txt",
+        "sha256": "7df747a457ff2357f36844e241afca6db4bcf0eedccdeabe322424ba2d5440d2"
+      }
+    },
+    "macos-x86_64": {
+      "os": "macOS",
+      "platform": "darwin",
+      "architecture": "x86_64",
+      "minimum_os": "13.0",
+      "lock": {
+        "file": "locks/macos-universal2.txt",
+        "sha256": "7df747a457ff2357f36844e241afca6db4bcf0eedccdeabe322424ba2d5440d2"
+      }
+    },
+    "windows-x86_64": {
+      "os": "Windows",
+      "platform": "win32",
+      "architecture": "x86_64",
+      "minimum_os": "10.0",
+      "lock": {
+        "file": "locks/windows-x86_64.txt",
+        "sha256": "95b8b0daed34870cad8819edb0362ad7999dfea6ff585f5b1af7e09fb56d034f"
+      }
+    }
+  }
+}

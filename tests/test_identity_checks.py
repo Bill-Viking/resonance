@@ -47,6 +47,103 @@ class IdentityCheckTests(unittest.TestCase):
     def current(self):
         return self.store.request_snapshot(self.request['id'])
 
+    def facebook_action(self, suffix, source_url, kind='comment'):
+        store = server.Store(Path(self.temp.name) / ('facebook-' + suffix))
+        account = store.mutate('POST', '/api/accounts', dict(
+            platform='Facebook', handle='river_example',
+            url='https://www.facebook.com/river_example', identity_mode='unclassified'))[1]['account']
+        review = store.mutate('POST', '/api/reviews', dict(
+            account_id=account['id'], kind=kind, title='Synthetic source',
+            excerpt='A synthetic observation.', source_url=source_url,
+            severity='attention', finding='A concrete concern.'))[1]['review']
+        request = store.mutate('POST', '/api/action-requests', dict(
+            review_id=review['id'], action='delete'))[1]['action_request']
+        path = '/api/action-requests/' + request['id']
+        return store, account, request, path
+
+    def test_own_facebook_comment_and_nested_reply_on_foreign_parent_can_start_once(self):
+        for kind, query in (('comment', 'comment_id=2001'),
+                            ('reply', 'comment_id=2001&reply_comment_id=3001')):
+            with self.subTest(kind=kind):
+                source = 'https://www.facebook.com/other_example/posts/1001?' + query
+                store, account, request, path = self.facebook_action(kind, source, kind)
+                checked = store.mutate('POST', path + '/identity-check',
+                                       observation(account, request))[1]['action_request']
+                self.assertEqual(checked['identity_preflight']['status'], 'matched')
+                self.assertTrue(checked['can_execute'])
+                started = store.mutate('POST', path + '/start',
+                                       {'identity_check_id': checked['identity_check']['id']})[1]['action_request']
+                self.assertEqual(started['execution_state'], 'running')
+                with self.assertRaises(server.Invalid):
+                    store.mutate('POST', path + '/start',
+                                 {'identity_check_id': checked['identity_check']['id']})
+
+    def test_facebook_comment_still_requires_fresh_active_and_observed_author(self):
+        source = 'https://www.facebook.com/other_example/posts/1001?comment_id=2001'
+        cases = (
+            ('active', dict(handle='other_example', profile_url='https://www.facebook.com/other_example')),
+            ('author', dict(author_handle='other_example',
+                            author_profile_url='https://www.facebook.com/other_example')),
+            ('missing-author-profile', dict(author_profile_url='')),
+        )
+        for suffix, changes in cases:
+            with self.subTest(suffix=suffix):
+                store, account, request, path = self.facebook_action(suffix, source)
+                checked = store.mutate('POST', path + '/identity-check',
+                                       observation(account, request, **changes))[1]['action_request']
+                self.assertFalse(checked['can_execute'])
+                with self.assertRaises(server.Invalid):
+                    store.mutate('POST', path + '/start',
+                                 {'identity_check_id': checked['identity_check']['id']})
+        store, account, request, path = self.facebook_action('expired', source)
+        checked = store.mutate('POST', path + '/identity-check',
+                               observation(account, request))[1]['action_request']
+        later = server.instant(checked['identity_check']['checked_at']) + timedelta(seconds=301)
+        with patch('server.now', return_value=later.isoformat()):
+            with self.assertRaises(server.Invalid):
+                store.mutate('POST', path + '/start',
+                             {'identity_check_id': checked['identity_check']['id']})
+
+    def test_facebook_comment_identity_binding_cannot_be_replaced(self):
+        source = 'https://www.facebook.com/other_example/posts/1001?comment_id=2001'
+        store, account, request, path = self.facebook_action('binding', source)
+        for field, value in (('account_id', 'other'), ('source_key', 'other'),
+                             ('source_url', source.replace('2001', '2002')),
+                             ('evidence_fingerprint', 'other')):
+            with self.subTest(field=field):
+                with self.assertRaises(server.Invalid):
+                    store.mutate('POST', path + '/identity-check',
+                                 observation(account, request, **{field: value}))
+
+    def test_facebook_parent_post_and_x_reply_owner_conflicts_remain(self):
+        source = 'https://www.facebook.com/other_example/posts/1001'
+        store, account, request, path = self.facebook_action('parent', source, 'post')
+        checked = store.mutate('POST', path + '/identity-check',
+                               observation(account, request))[1]['action_request']
+        self.assertFalse(checked['can_execute'])
+        with self.assertRaises(server.Invalid):
+            store.mutate('POST', path + '/start',
+                         {'identity_check_id': checked['identity_check']['id']})
+        self.assertFalse(workflow.source_author_matches(
+            self.account, 'https://x.com/other_example/status/1001'))
+
+    def test_facebook_comment_selector_exception_is_exact(self):
+        account = dict(platform='Facebook', handle='river_example',
+                       url='https://www.facebook.com/river_example')
+        base = 'https://www.facebook.com/other_example/posts/1001'
+        for query in ('comment_id=2001&comment_id=2002', 'comment_id=',
+                      'comment_id=2001&reply_comment_id=',
+                      'comment_id=2001&reply_comment_id=3001&reply_comment_id=3002'):
+            with self.subTest(query=query):
+                self.assertFalse(workflow.source_author_matches(account, base + '?' + query))
+        self.assertFalse(workflow.source_author_matches(account, base))
+        self.assertFalse(workflow.precise_source(
+            'https://www.facebook.com/other_example/photos/1001?comment_id=2001',
+            'Facebook', 'comment'))
+        self.assertFalse(workflow.precise_source(
+            'https://www.facebook.com.evil.example/other_example/posts/1001?comment_id=2001',
+            'Facebook', 'comment'))
+
     def test_missing_check_cannot_start_but_is_available_for_preparation(self):
         self.assertFalse(self.request['can_execute'])
         self.assertTrue(self.request['can_prepare'])

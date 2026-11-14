@@ -1,0 +1,167 @@
+{
+  "format": 1,
+  "sources": [
+    {
+      "file": "CPython-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/python/cpython/v3.14.10/LICENSE",
+      "size": 13804,
+      "sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231"
+    },
+    {
+      "file": "CPython-license.rst",
+      "url": "https://raw.githubusercontent.com/python/cpython/v3.14.10/Doc/license.rst",
+      "size": 60039,
+      "sha256": "8a7329b25131f64b2bea284155f0824876b1af9f4a2f970e6335751d97dfa6dd"
+    },
+    {
+      "file": "PyInstaller-COPYING.txt",
+      "url": "https://raw.githubusercontent.com/pyinstaller/pyinstaller/v6.22.3/COPYING.txt",
+      "size": 32604,
+      "sha256": "0598064c7d2718e38d7914a7d08343b2fa008e3bea9ebba2aa7a6ffa5900dd64"
+    },
+    {
+      "file": "libffi-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/libffi/libffi/v3.5.2/LICENSE",
+      "size": 1132,
+      "sha256": "d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366"
+    },
+    {
+      "file": "tzdata-LICENSE",
+      "url": "https://files.pythonhosted.org/packages/ce/e4/dccd7f47c4b64213ac01ef921a1337ee6e30e8c6466046018326977efd95/tzdata-2026.2-py2.py3-none-any.whl#tzdata-2026.2.dist-info/licenses/LICENSE",
+      "size": 592,
+      "sha256": "33e8e5002d3512d3fcc2282b995e6bad9d334781b9c5ac31843f404900e1f3b4"
+    },
+    {
+      "file": "tzdata-LICENSE_APACHE",
+      "url": "https://files.pythonhosted.org/packages/ce/e4/dccd7f47c4b64213ac01ef921a1337ee6e30e8c6466046018326977efd95/tzdata-2026.2-py2.py3-none-any.whl#tzdata-2026.2.dist-info/licenses/licenses/LICENSE_APACHE",
+      "size": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "file": "SQLite-LICENSE.md",
+      "url": "https://raw.githubusercontent.com/sqlite/sqlite/fdae0f54427d4320f2acdec7edc3e8eb9842dd58/LICENSE.md",
+      "size": 3829,
+      "sha256": "c9053892d578840a196d588ff68baa9bc0f5240eb215fb9cf91cd6b0b3209305"
+    },
+    {
+      "file": "XZ-COPYING",
+      "url": "https://raw.githubusercontent.com/tukaani-project/xz/v5.8.4/COPYING",
+      "size": 3119,
+      "sha256": "616a3ad264ce29b8f1cb97e53037b139d406899ca8d1f799651e17bfa09830b8"
+    },
+    {
+      "file": "bzip2-LICENSE",
+      "url": "https://sourceware.org/git/?p=bzip2.git;a=blob_plain;f=LICENSE;hb=bzip2-1.0.8",
+      "size": 1896,
+      "sha256": "c6dbbf828498be844a89eaa3b84adbab3199e342eb5cb2ed2f0d4ba7ec0f38a3"
+    },
+    {
+      "file": "Tcl-license.terms",
+      "url": "https://www.python.org/ftp/python/3.14.10/python-3.14.10-macos11.pkg#Python_Framework.pkg/Payload/Versions/3.14/Frameworks/Tcl.framework/Versions/9.0/Resources/license.terms",
+      "size": 2255,
+      "sha256": "c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16"
+    },
+    {
+      "file": "Tk-license.terms",
+      "url": "https://www.python.org/ftp/python/3.14.10/python-3.14.10-macos11.pkg#Python_Framework.pkg/Payload/Versions/3.14/Frameworks/Tk.framework/Versions/9.0/Resources/license.terms",
+      "size": 2267,
+      "sha256": "2cde822b93ca16ae535c954b7dfe658b4ad10df2a193628d1b358f1765e8b198"
+    },
+    {
+      "file": "XZ-COPYING.0BSD",
+      "url": "https://raw.githubusercontent.com/tukaani-project/xz/v5.8.4/COPYING.0BSD",
+      "size": 607,
+      "sha256": "0b01625d853911cd0e2e088dcfb743261034a091bb379246cb25a14cc4c74bf1"
+    },
+    {
+      "file": "OpenSSL-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/openssl/openssl/openssl-3.5.9/LICENSE.txt",
+      "size": 10175,
+      "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+    },
+    {
+      "file": "libtommath-LICENSE",
+      "url": "https://raw.githubusercontent.com/libtom/libtommath/v1.3.0/LICENSE",
+      "size": 1257,
+      "sha256": "2fa64b163659f41965c9815882a8296d3d03ff546b76153e11445f9bdecf955a"
+    },
+    {
+      "file": "Zstandard-LICENSE",
+      "url": "https://raw.githubusercontent.com/facebook/zstd/v1.5.7/LICENSE",
+      "size": 1549,
+      "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
+    },
+    {
+      "file": "Expat-COPYING",
+      "url": "https://raw.githubusercontent.com/libexpat/libexpat/R_2_9_0/COPYING",
+      "size": 1144,
+      "sha256": "73cc92f80889ab23c7287b1a11dd50fdec190c3f26ebe5938c579043817d651e"
+    },
+    {
+      "file": "libffi-3.4.4-LICENSE",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/libffi-3.4.4/LICENSE",
+      "size": 1132,
+      "sha256": "2c9c2acb9743e6b007b91350475308aee44691d96aa20eacef8e199988c8c388"
+    },
+    {
+      "file": "XZ-5.2.5-COPYING",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/xz-5.2.5/COPYING",
+      "size": 2775,
+      "sha256": "bcb02973ef6e87ea73d331b3a80df7748407f17efdb784b61b47e0e610d3bb5c"
+    },
+    {
+      "file": "XZ-5.2.5-COPYING.GPLv2",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/xz-5.2.5/COPYING.GPLv2",
+      "size": 18092,
+      "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+    },
+    {
+      "file": "XZ-5.2.5-COPYING.LGPLv2.1",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/xz-5.2.5/COPYING.LGPLv2.1",
+      "size": 26530,
+      "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+    },
+    {
+      "file": "zlib-ng-LICENSE.md",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/zlib-ng-2.2.4/LICENSE.md",
+      "size": 867,
+      "sha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee"
+    },
+    {
+      "file": "Tcl-windows-license.terms",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/tcl-9.0.4.0/license.terms",
+      "size": 2255,
+      "sha256": "c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16"
+    },
+    {
+      "file": "Tk-windows-license.terms",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/tk-9.0.4.1/license.terms",
+      "size": 2267,
+      "sha256": "2cde822b93ca16ae535c954b7dfe658b4ad10df2a193628d1b358f1765e8b198"
+    },
+    {
+      "file": "mpdecimal-4.0.0-COPYRIGHT.txt",
+      "url": "https://raw.githubusercontent.com/python/cpython-source-deps/mpdecimal-4.0.0/COPYRIGHT.txt",
+      "size": 1285,
+      "sha256": "2713324211652ce4a60e6e21e54f9dc3004299e591b0933a352f1a89c5fb53c2"
+    },
+    {
+      "file": "ctypes-macholib-README.ctypes",
+      "url": "https://raw.githubusercontent.com/python/cpython/v3.14.10/Lib/ctypes/macholib/README.ctypes",
+      "size": 296,
+      "sha256": "dc29d1da83b6a0a09a41647e4111eee878ed079c2d6b54a98fd6d8b88dd581f2"
+    },
+    {
+      "file": "HACL-LICENSE",
+      "url": "https://raw.githubusercontent.com/hacl-star/hacl-star/8ba599b2f6c9701b3dc961db895b0856a2210f76/LICENSE",
+      "size": 11356,
+      "sha256": "c5accbbd8546e94c34aed24afe689a617627d18eed5a6c48277e48db57c23851"
+    },
+    {
+      "file": "mpdecimal-4.0.1-COPYRIGHT.txt",
+      "url": "https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-4.0.1.tar.gz#mpdecimal-4.0.1/COPYRIGHT.txt",
+      "size": 1285,
+      "sha256": "dba079e24a0286052f9f36a5e0b4f6cc95bc83ada657eb26bef8c0b6473f6512"
+    }
+  ]
+}

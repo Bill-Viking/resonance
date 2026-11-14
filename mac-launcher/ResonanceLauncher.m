@@ -19,7 +19,7 @@ int main(void) {
         if (!launched || task.terminationStatus != 0) {
             NSString *detail = launched ? [[NSString alloc] initWithData:output encoding:NSUTF8StringEncoding] : error.localizedDescription;
             NSAlert *alert = [[NSAlert alloc] init];
-            alert.messageText = @"Resonance could not open";
+            alert.messageText = @"Resonance Source Launcher could not open";
             alert.informativeText = detail.length ? detail : @"Try again, or ask your assistant to repair the Mac launcher. Your saved data is kept.";
             [alert addButtonWithTitle:@"OK"];
             [NSApp activateIgnoringOtherApps:YES];

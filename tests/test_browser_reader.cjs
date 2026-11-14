@@ -655,6 +655,59 @@ test("a held, errored or invalid account never carries items and does not stop t
   assert.ok(S.validateResult(out[0], { requestId: two[0].requestId, provider: "x", mode: "live", handle: "fx_x_ok", channelId: null }));
 });
 
+test("a long activity history is bounded to 64 examined rows and still reports more available", () => {
+  const { parseHtml } = require(path.join(HARNESS, "dom_adapter.cjs"));
+  const row = i => `<div role="listitem"><a href="https://www.youtube.com/watch?v=${"abcdefghij"}${i % 10}&amp;lc=UgxLongFixture${String(i).padStart(4, "0")}">Commented</a></div>`;
+  const page = count => parseHtml(`<main><h1>Your YouTube Comments</h1><div role="list">${Array.from({ length: count }, (_, i) => row(i)).join("")}</div></main>`);
+  const ctx = { sites: S.SITES.live, base: "https://myactivity.google.com/page/comments" };
+  const long = S.ytActivity(page(100), ctx);
+  assert.equal(long.state, "ready");
+  assert.equal(long.listed, 64);
+  assert.equal(long.more_available, true);
+  assert.equal(long.candidates.length, 3);
+  assert.ok(long.skipped.every(r => r.count <= 64));
+  const exact = S.ytActivity(page(64), ctx);
+  assert.equal(exact.listed, 64);
+  const short = S.ytActivity(page(5), ctx);
+  assert.equal(short.listed, 5);
+  assert.equal(short.more_available, true, "more than three candidates is still more available");
+});
+
+test("a result whose accepted count exceeds its examined count is invalid", () => {
+  const request = { requestId: newId(), provider: "x", mode: "live", handle: "fx_x_ok", channelId: null };
+  const item = n => ({ provider: "x", source_id: `500${n}`, url: `https://x.com/fx_x_ok/status/500${n}`, author: "fx_x_ok", channel_id: null,
+    text: `Original statement ${n}.`, date_iso: null, date_label: "Oct 16", date_unknown: true, links_shortened: false });
+  const result = examined => ({ type: "RESULT", requestId: request.requestId, provider: "x", mode: "live", status: "ok", tabs: [1],
+    items: [item(1), item(2)], identity: { handle: "fx_x_ok", channel_id: null },
+    coverage: { limit: 3, accepted: 2, examined, skipped: [], more_available: false, partial: true, notes: [] } });
+  assert.equal(S.validateResult(result(2), request), true);
+  assert.equal(S.validateResult(result(64), request), true);
+  assert.equal(S.validateResult(result(1), request), false);
+  assert.equal(S.validateResult(result(0), request), false);
+  assert.equal(S.validateResult(result(65), request), false);
+});
+
+test("an inconsistent coverage count spoils only its own account, not the valid ones", async () => {
+  const { page } = await boot();
+  page.clear();
+  let tampered = false;
+  page.tamper = message => {
+    if (message.type === "RESULT" && !tampered && message.status === "ok") {
+      tampered = true;
+      message.coverage.examined = 0;
+    }
+    return message;
+  };
+  const two = [req("x", "fx_x_ok"), req("youtube", "fx_yt_ok")];
+  const id = await check(page, two);
+  await until(finished(page, id), "coverage done");
+  const out = resultsOf(page, id);
+  assert.deepEqual([out[0].status, out[0].reason, out[0].items], ["error", "result_invalid", undefined]);
+  assert.equal(out[1].status, "ok");
+  assert.equal(out[1].items.length, 3);
+  assert.ok(S.validateResult(out[1], { requestId: two[1].requestId, provider: "youtube", mode: "live", handle: "fx_yt_ok", channelId: null }));
+});
+
 test("mismatched or unrequested worker output is ignored", async () => {
   const { page } = await boot();
   page.clear();
@@ -1160,8 +1213,9 @@ test("popup: two trusted buttons, the exact app root and the own options page", 
 test("build_reader.py makes a deterministic zip and SHA256 manifest in a fresh folder", () => {
   const tool = path.join(ROOT, "tools", "build_reader.py");
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "res-reader-build-"));
-  const run = out => childProcess.spawnSync("python3", ["-I", tool, "--out", out], { encoding: "utf8", cwd: base });
   try {
+    const runtime = require("./reader-fixtures/audited_runtime.cjs").auditedRuntime(ROOT, base);
+    const run = out => childProcess.spawnSync("python3", ["-I", tool, "--runtime", runtime, "--out", out], { encoding: "utf8", cwd: base });
     const a = path.join(base, "a");
     const b = path.join(base, "b");
     const first = run(a);

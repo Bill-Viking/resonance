@@ -148,6 +148,7 @@ class MonitorCommandTests(unittest.TestCase):
         profile = json.loads(output.getvalue())
         self.assertEqual([a['id'] for a in profile['accounts']], [self.account['id']])
         self.assertEqual(profile['brand']['voice'], 'Plain and specific.')
+        self.assertEqual((profile['brand']['public_signature'], profile['brand']['public_banner']), ('off', False))
         self.assertFalse(profile['learning']['available'])
         self.assertEqual(profile['precedents'], {'kept': [], 'changed': []})
         self.assertEqual(before, self.files())

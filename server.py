@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Resonance local edition. Python 3.9+; Windows also uses tzdata."""
 import argparse
+import assistant_kit
 import base64
 import binascii
 from contextlib import closing, contextmanager
@@ -37,6 +38,8 @@ ATTESTATION_FIELDS = {'id', 'review_id', 'account_id', 'source_key', 'evidence_f
 SOURCE_DECISION_FIELDS = {'id', 'account_id', 'source_key', 'evidence_fingerprint', 'status', 'snoozed_until', 'created_at', 'updated_at'}
 FLAG_EVIDENCE_FIELDS = {'id', 'review_id', 'account_id', 'title', 'detail', 'excerpt', 'source_url', 'rule', 'category', 'captured_at'}
 BRAND_FIELDS = {'description', 'audience', 'voice', 'avoid', 'updated_at'}
+BRAND_PUBLIC_FIELDS = {'public_signature', 'public_banner'}
+PUBLIC_SIGNATURES = ('off', 'compact', 'full')
 ACCESS_FIELDS = {'account_id', 'status', 'method', 'checked_at', 'detail', 'capabilities'}
 SETUP_REQUEST_FIELDS = {'id', 'account_id', 'status', 'created_at', 'updated_at', 'note'}
 MAIL_SYNC_FIELDS = {'account_id', 'checked_at', 'scope', 'imported_count', 'has_more', 'total_count', 'unread_count'}
@@ -585,17 +588,26 @@ def present_inbox(record):
 
 
 def brand_defaults():
-    return {'description': '', 'audience': '', 'voice': '', 'avoid': '', 'updated_at': None}
+    return {'description': '', 'audience': '', 'voice': '', 'avoid': '', 'updated_at': None,
+            'public_signature': 'off', 'public_banner': False}
 
 
 def brand_record(data, partial=False):
-    fields(data, BRAND_FIELDS, () if partial else BRAND_FIELDS)
+    """Validate a brand record. A full record is returned as a copy with the optional
+    public credit choices filled in as off/false; nothing is written by reading."""
+    fields(data, BRAND_FIELDS | BRAND_PUBLIC_FIELDS, () if partial else BRAND_FIELDS)
     for key in ('description', 'audience', 'voice', 'avoid'):
         if key in data:
             string(data[key], key.capitalize(), 4000)
     if 'updated_at' in data:
         timestamp(data['updated_at'], nullable=True)
-    return data
+    if 'public_signature' in data:
+        choice(data['public_signature'], PUBLIC_SIGNATURES, 'public signature')
+    if 'public_banner' in data and type(data['public_banner']) is not bool:
+        raise Invalid('Public banner must be true or false.')
+    if partial:
+        return data
+    return dict({'public_signature': 'off', 'public_banner': False}, **data)
 
 
 def capabilities(value):
@@ -1120,7 +1132,15 @@ def reader_check_tables(store, db):
     reader_checks.create_tables(db)
 
 
-MIGRATIONS = (initialize_database, rename_action_scope, identity_check_guards, edit_availability_contract, request_inbox_table, reader_check_tables)
+def public_brand_contract(store, db):
+    # A format barrier: older editions parse only the four brand text fields and would
+    # fail the whole workspace on the optional public-credit choices. Existing rows are
+    # not rewritten (a stored row without the choices still reads as off/false); the
+    # normal migration backup applies.
+    pass
+
+
+MIGRATIONS = (initialize_database, rename_action_scope, identity_check_guards, edit_availability_contract, request_inbox_table, reader_check_tables, public_brand_contract)
 
 
 class Store:
@@ -2058,7 +2078,7 @@ class Store:
         state.pop('policy_flags')
         state.pop('source_items')
         state.pop('reader_check_summary')
-        state['schema_version'] = 3
+        state['schema_version'] = 4
         state['reviews'].sort(key=lambda value: (value['reviewed_at'], value['id']), reverse=True)
         for request in state['action_requests']:
             for field in ('confirmation_required', 'scheduled_for', 'can_cancel', 'can_execute', 'can_prepare', 'identity_preflight', 'edit_preflight'):
@@ -2520,7 +2540,7 @@ class Store:
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             if path == '/api/brand' and method == 'PATCH':
-                fields(body, {'description', 'audience', 'voice', 'avoid'})
+                fields(body, {'description', 'audience', 'voice', 'avoid'} | BRAND_PUBLIC_FIELDS)
                 brand_record(body, partial=True)
                 brand = brand_record(json.loads(db.execute('SELECT data FROM communication_brand WHERE id=1').fetchone()[0]))
                 brand.update(body)
@@ -3168,7 +3188,7 @@ class Store:
             raise Invalid('Sample records cannot be imported with your own data.')
         self.materialize_flag_evidence(db)
         fields(body, {'schema_version', 'settings', 'accounts', 'reviews', 'policy_decisions', 'flag_evidence', 'action_requests', 'attestations', 'source_decisions', 'request_inbox', 'monitoring', 'communication', 'reader_checks', 'reader_sources', 'reader_revisions'}, {'schema_version', 'settings', 'accounts', 'reviews'})
-        if type(body['schema_version']) is not int or body['schema_version'] not in (1, 2, 3):
+        if type(body['schema_version']) is not int or body['schema_version'] not in (1, 2, 3, 4):
             raise Invalid('Unsupported backup version.')
         if body['schema_version'] < 3 and {'reader_checks', 'reader_sources', 'reader_revisions'} & set(body):
             raise Invalid('Reader check history needs backup format 3.')
@@ -3494,7 +3514,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path == '/api/data-folder':
                 self.send_content(200, self.server.store.data_folder_details())
             elif path == '/api/assistant':
-                self.send_content(200, {'prompt': f'Read ASSISTANT.md in {ROOT} and run my Resonance check.'})
+                kit = assistant_kit.ensure(ROOT, destination=getattr(self.server, 'assistant_kit_destination', None),
+                                           data_directory=self.server.store.directory)
+                self.send_content(200, {'prompt': f'Read ASSISTANT.md in {kit} and run my Resonance check.'})
             elif path == '/api/brief':
                 self.send_content(200, self.server.store.brief(self.workspace_token()), 'text/markdown', 'resonance-brief.md')
             elif path in STATIC:
@@ -3509,6 +3531,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_content(404, {'error': 'Not found.'})
         except (Invalid, samples.SampleError) as error:
             self.send_content(400, {'error': str(error)})
+        except assistant_kit.KitError:
+            self.send_content(500, {'error': assistant_kit.REPAIR})
         except (sqlite3.Error, OSError):
             self.send_content(500, {'error': 'Local data could not be read. Check the data folder and try again.'})
 

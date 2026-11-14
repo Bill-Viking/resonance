@@ -1,87 +1,115 @@
-# Public writing and artwork with RES
+# Public writing and artwork with Resonance
 
-Use this workflow when the user asks the assistant to create public writing or
-artwork through Resonance, including a new post or reply. It governs preparation
-and attribution. It does not publish anything, grant account access or authorize
-changes to existing posts. Public-post checks, edits and deletions still follow
-[ASSISTANT.md](ASSISTANT.md).
+Use this workflow when the user asks an external assistant to prepare a new
+public post, reply or artwork through Resonance. It governs preparation and
+optional attribution. It does not publish anything, grant account access or
+authorize changes to existing posts. Public-post checks, edits and deletions
+still follow [ASSISTANT.md](ASSISTANT.md).
 
-## Public identity
+The exact two-line withdrawal text in the [Work Safe procedure](docs/SAFE-WORK.md)
+is a narrow, user-authorized edit fallback, not a RES signature or general
+attribution default.
 
-**RES is the public voice and creator credit for work the assistant creates through
-Resonance.** Do not replace it with the session's persona, model, vendor, machine,
-effort level or operational banner. Those identify an internal working session;
-keep them out of captions, signatures, artwork credits and public alt text.
+## Branding is the user's choice
 
-Describe the contribution truthfully. For an original AI-generated creation,
-use credit such as “Created by RES · AI-generated.” For assistance with the user's
-own work, use “Prepared with RES · AI-assisted.” Keep the user's and other authors'
-existing credits; do not claim their writing, quoted material or supplied artwork
-as a RES original. RES branding does not mean the local app has a model inside it.
-The external assistant performs the creative work.
+**New users start with no RES signature, repository link or graphic banner.**
+Using Resonance does not require advertising it. Do not add an AI credit line as
+a substitute for an unwanted signature. Do not falsely claim human authorship
+or remove other people's existing credits. Answer authorship questions honestly.
+A destination’s required AI-content label is separate from RES branding: Off does
+not disable it; raise it with the user when applicable.
 
-## Choose the treatment for this item
+Users can open **Settings & data → Preferences: personal brand and RES credit**
+and save their choice under **RES credit on public drafts**:
 
-The user's explicit instruction for this item wins over every default below.
-“No signature,” “no branding,” or “use this exactly” means no added signature,
-banner, creator line or repository link. A requested custom signature replaces
-the default; do not append RES a second time. A choice for one item does not change
-the standing default for later items.
+| Setting | What it asks the assistant to include |
+| --- | --- |
+| **Text signature: Off** (default) | No added RES text signature or project link. |
+| **Text signature: Short — RES** | A compact `— RES` signature. |
+| **Text signature: Full — RES and project link** | The two-line signature below. |
+| **Include my approved RES banner** (off by default) | The user's separately supplied, approved image, when available. This choice is independent of the text signature. |
 
-| Choice | When to use it | What belongs in the finished item |
-| --- | --- | --- |
-| **Full text** | A new standalone post or substantial creation, when the format suits it. | The two-line RES text signature below, with its actual repository URL, plus truthful creation credit where relevant. Do not attach a graphic banner by default. |
-| **Compact** | A short reply or a context where a full treatment would dominate the message. | A short signature such as “— RES”. Do not attach a graphic banner or repeat the repository link on every reply. |
-| **Omit** | The user asks for no attribution or supplies exact text to use unchanged. | No added RES signature, banner, credit or repository link. |
+These are instructions for an external assistant. The local app has no model,
+does not generate or attach a banner, and never adds branding to saved text or
+publishes it automatically. The choice applies to new public drafts, not mail,
+imported posts, report excerpts or the exact replacement text of an approved edit.
 
-Use this full text signature for future standalone creations:
+## Read the choice before drafting
+
+Run the read-only profile command from the Resonance folder (Windows: `py -3`
+or `python` in place of `python3`):
+
+```text
+python3 monitor.py --profile
+```
+
+The `brand` object contains `public_signature` (`off`, `compact` or `full`) and
+`public_banner` (`true` or `false`). Missing fields in an older profile mean
+`off` and `false`. The profile command works without a running app. It creates
+no files and runs no database upgrade. If it refuses, explain the limit; do not
+change the user's data to read a preference. A new draft does not require a
+saved account. If no saved preference can be read and the user has given none,
+prepare the draft without branding.
+
+The user's explicit instruction for this item wins. “No signature,” “no branding,”
+or “use this exactly” means no added signature, banner, credit or repository
+link. A requested custom signature replaces the default; never append RES twice.
+A separately stated standing preference also applies until the user changes it;
+do not apply one person's advertising choice to anyone else. If a standing
+preference conflicts with a saved choice and it is unclear which is newer,
+ask one short question instead of guessing. A one-item override does not change
+the saved choice or grant permission to rewrite earlier work.
+
+When the user chooses full text, use:
 
 ```text
 RES — Your Personal Brand Assistant
 https://github.com/Bill-Viking/resonance
 ```
 
-Keep the actual URL in the finished text so platforms that support links can make
-it clickable. In formats with explicit hyperlinks, link it to that same address.
-Do not shorten it to an unlinked label or add tracking parameters. A platform that
-does not support clickable caption links still gets the plain URL; do not claim it
-is clickable there.
+Keep the actual URL without tracking parameters. Do not claim that a platform
+makes it clickable unless it does. If the chosen treatment does not fit a length
+limit, show a shorter alternative for the user to review. Do not silently change
+their saved preference.
 
-Choose by context without asking the user to configure every item. The full text
-signature is not a reason to crowd out the message or duplicate a link already
-present. If the user specifies full, compact or omit, use that choice. Preserve
-truthful AI disclosure separately from branding; an omitted
-signature must not become a false claim of human authorship. Where disclosure is
-needed, a compact line can say “— RES · AI-assisted”; do not substitute a session
-persona as the creator.
+If the user requests creation credit, describe the contribution truthfully, for
+example “Prepared with RES · AI-assisted” or “Created by RES · AI-generated.”
+RES identifies only the work the external assistant contributed. Never replace
+it with an internal session's persona, model, vendor, machine or operational
+banner. Preserve the user's and other authors' existing credits.
 
-Use a graphic banner only when the user explicitly asks for one for that item.
-Then use the exact approved asset from the user's private branding record when
-available. Preserve its locked graphic, wording, layout and proportions. Do
-not regenerate, redesign, crop or overwrite it to satisfy this default. If it is
-unavailable, prepare a text treatment and say the approved image was unavailable;
-do not invent a replacement or claim that it was used. Private artwork, approval
-records and provider receipts stay outside source, fixtures and release exports.
-Build work does not need to read or copy them.
+## Optional graphic banner
+
+Use a graphic only when the user opts in through the saved setting or explicitly
+asks for one. Use the exact approved asset supplied separately by that user.
+Preserve its wording, layout and proportions. Do not regenerate, redesign, crop
+or overwrite it. If it is unavailable, prepare the text and say the image is
+unavailable; do not invent a replacement or claim it was attached. Private
+artwork and approval records stay outside source, fixtures and release exports.
 
 ## Prepare and check the final item
 
-1. Identify the requested destination, whether this is a new item or a reply, and
-   any exact wording, signature or omission instruction. Keep the user's voice
-   and existing authorship intact. Do not add branding to collected source text,
-   report excerpts, copied user text or a previously approved edit.
-2. Apply full, compact or omit to the actual draft and any requested media. Keep
-   the selected treatment beside the local preview, not inside the public copy
-   as an implementation note. Show the user the finished text and artwork together
-   so the signature, link and disclosure are part of what they review.
-3. Before handing off, check: RES receives only the credit it earned; short replies
-   remain compact; explicit omission/custom wording wins; no internal session
-   plate has entered any public field; and the approved graphic is unchanged.
-   A factual mention of a tool requested by the user can remain in the body, but
-   it is not the public creator signature.
-4. Publication is separate work. This edition has no guarded publish/reply action.
-   A draft or a standing branding preference grants no permission to post, attach
-   media, edit or delete. Follow the separately authorized publishing workflow
-   with its exact destination and final preview, required confirmation, attempt
-   record and verified receipt. Never retrofit an already published item merely
-   to apply these defaults, and never add branding after approval.
+1. Identify the destination, whether this is a new item or a reply, and any exact
+   wording or attribution instruction. Keep the user's voice and authorship.
+2. Read the saved choice and apply any direct user instruction. Show the finished
+   text and any requested media together. Keep preference and implementation
+   explanations outside the public copy.
+3. Check that off means no added branding; opt-in choices match the preview;
+   custom wording appears only once; no internal session plate entered a public
+   field; and any approved graphic remains unchanged.
+4. Publication is separate work. This edition has no guarded publish/reply
+   action. A draft or saved branding choice grants no permission to post,
+   attach media, edit or delete. Follow the separately authorized publishing
+   workflow with its exact destination, final preview, required confirmation,
+   attempt record and verified receipt. Never retrofit a published item to
+   apply a preference, and never add branding after approval.
+
+Drafting alone needs no sign-in. If the user separately authorizes browser-based
+publication, first inspect the browser inventory your tools expose and name the
+browser you can actually use. A login in the user's other browser is not a login
+in the assistant's built-in browser. If sign-in is needed, open the supported
+browser's sign-in page and give one concrete step at a time, naming that window
+and page. The user enters credentials; never collect or move them. Afterward,
+verify the live account and carry forward the unchanged approved item without
+inventing an extra discretionary approval loop. Required tool confirmations and
+the separately authorized publishing workflow still apply.

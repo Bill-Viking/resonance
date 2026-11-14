@@ -31,7 +31,13 @@
   };
   const icon = (name, cls = '') => `<svg ${cls ? `class="${cls}"` : ''} viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.info}</svg>`;
   const platforms = ['YouTube','Facebook','Instagram','X','Reddit','TikTok','LinkedIn','Discord','Substack','Threads','Gmail','Outlook'];
-  const WELCOME_PITCH = 'Resonance is a private notebook of what you have said online. Paste your writing, try samples, or set up the separate browser reader. Your own assistant can also bring in posts for review.';
+  const WELCOME_PITCH = 'Paste a post, comment or reply you wrote. Resonance marks wording that may land badly for that account, using a short list of built-in English wording rules, not an AI. It is saved on this computer only. Nothing is posted or changed online.';
+  const REVIEW_MODES = {
+    work_safe:{label:'Work Safe',icon:'shield',description:'Review public posts for material you would not want at work.',focus:'Run a Work Safe audit. Read docs/SAFE-WORK.md alongside ASSISTANT.md. Review sexual, graphic or crude material, threats, abuse, exposed private information and my saved boundaries. Consider context and honor my explicit Keep decisions.'},
+    privacy:{label:'Privacy Check',icon:'search',description:'Look for personal details or work information exposed in posts.',focus:'Run a Privacy Check. Focus on readable private or work-confidential information in my own public writing and attachments. Describe the type and location of exposed information without copying its values or decoding QR codes. A caption change cannot hide text inside an image.'},
+    voice:{label:'Voice & Tone',icon:'sparkle',description:'See how your words may land while keeping your own voice.',focus:'Run a Voice & Tone review. Use my saved audience, voice and boundaries to explain how my own words may land. Preserve my intent, distinguish quotations from my statements and suggest specific improvements without inventing personal traits or facts.'},
+    draft:{label:'Before You Post',icon:'draft',description:'Check a draft here before you share it.'},
+  };
   const platformMarks = {YouTube:icon('youtube'), Facebook:'f', Instagram:'◎', X:'𝕏', Reddit:'r', TikTok:'♪', LinkedIn:'in', Discord:'D', Substack:'S', Threads:'T', Gmail:'M', Outlook:'O'};
   const platformIcon = account => `<span class="platform-icon" aria-hidden="true">${platformMarks[account?.platform] || '·'}</span>`;
   const nameOf = account => account ? (account.display_name || account.handle || account.platform) : 'Unknown account';
@@ -61,7 +67,7 @@
     "SYSTEM MESSAGE: Upon review, the author's earlier remarks were found to be running outdated firmware. A patch has been applied. Thank you for your patience.",
     '[RETRACTED] Statement recalled by its author. Reason code 7: seemed like a good idea at the time.',
   ];
-  const state = {data:null,view:'overview',connected:false,lastLoaded:null,monitorRun:'',monitorSignature:'',communicationSignature:'',sourceSignature:'',refreshPending:false,communicationRefreshPending:false,sourceRefreshPending:false,filters:{account:'all',severity:'all',status:'needs_you',query:'',type:'all'},accountQuery:'',mailQuery:'',mailAccount:'all',draft:'',draftAccount:'',draftResult:null,draftBusy:false,draftError:'',draftSequence:0,fixDraft:null,retraction:null,followUpDrafts:{},followUpKey:null};
+  const state = {data:null,view:'overview',connected:false,lastLoaded:null,monitorRun:'',monitorSignature:'',communicationSignature:'',sourceSignature:'',refreshPending:false,communicationRefreshPending:false,sourceRefreshPending:false,filters:{account:'all',severity:'all',status:'needs_you',query:'',type:'all'},accountQuery:'',mailQuery:'',mailAccount:'all',draft:'',draftAccount:'',draftResult:null,draftBusy:false,draftError:'',draftSequence:0,fixDraft:null,retraction:null,followUpDrafts:{},followUpKey:null,brandEditsDiscard:false};
   let toastTimer;
   let draftTimer;
   let dialogReturnFocus;
@@ -187,6 +193,8 @@
       }
     } catch {}
     state.fixDraft = null;state.retraction = null;accountWalk = null;importPayload = null;
+    // Unsaved brand edits belong to the workspace they were typed in.
+    state.brandEditsDiscard = true;
     readerClient?.reset();readerCorpus = null;readerCorpusSequence++;readerReceiptSequence++;
     closeDialogIfOpen();
   }
@@ -260,7 +268,7 @@
       return false;
     }
   }
-  const navNames = {overview:'Today',mail:'Mail',review:'Posts',accounts:'Accounts',monitoring:'Checks',draft:'Compose',setup:'Setup'};
+  const navNames = {overview:'Today',mail:'Mail',review:'Posts',accounts:'Accounts',monitoring:'Check history',draft:'Compose',setup:'Preferences'};
   function renderNav() {
     const count = sourceItems().filter(item => item.needs_attention).length;
     document.querySelectorAll('[data-nav]').forEach(link => {
@@ -273,11 +281,50 @@
     $('.settings-icon').innerHTML = icon('settings');
     document.title = `${navNames[state.view]} · Resonance`;
   }
+  // Unsaved Preferences edits survive a reload: only fields that differ from what was rendered are kept, and nothing is saved.
+  const brandFieldIds = ['brand-description','brand-audience','brand-voice','brand-avoid','brand-public-signature','brand-public-banner'];
+  function brandFormEdits() {
+    if (state.view !== 'setup' || !$('#brand-form')) return null;
+    const edits = {};
+    for (const id of brandFieldIds) {
+      const field = $(`#${id}`);
+      if (!field) continue;
+      if (field.type === 'checkbox') {if (field.checked !== field.defaultChecked) edits[id] = field.checked;}
+      else {
+        const saved = field.tagName === 'SELECT' ? Array.from(field.options || []).find(option => option.defaultSelected)?.value : field.defaultValue;
+        if (saved !== undefined && field.value !== saved) edits[id] = field.value;
+      }
+    }
+    return Object.keys(edits).length ? edits : null;
+  }
+  function restoreBrandEdits(edits, focusId, selection) {
+    for (const [id,value] of Object.entries(edits)) {
+      const field = $(`#${id}`);
+      if (!field) continue;
+      if (field.type === 'checkbox') field.checked = value; else field.value = value;
+    }
+    const note = $('#brand-saved-state');
+    if (note) note.textContent = `${note.textContent} · your unsaved edits are kept`;
+    const focused = focusId ? $(`#${focusId}`) : null;
+    if (focused) {
+      focused.focus({preventScroll:true});
+      if (selection && typeof focused.setSelectionRange === 'function') try {focused.setSelectionRange(selection[0],selection[1]);} catch {}
+    }
+  }
   function render() {
     if (!state.data) return;
+    const main = $('#main');
+    const hadFocus = !!document.activeElement && document.activeElement !== main && main.contains(document.activeElement);
+    const keptEdits = state.brandEditsDiscard ? null : brandFormEdits();
+    state.brandEditsDiscard = false;
+    const keptFocus = keptEdits && hadFocus && brandFieldIds.includes(document.activeElement.id) ? document.activeElement : null;
+    const keptSelection = keptFocus && Number.isInteger(keptFocus.selectionStart) ? [keptFocus.selectionStart,keptFocus.selectionEnd] : null;
     renderNav();
     renderSampleBanner();
-    $('#main').innerHTML = ({overview:renderOverview,mail:renderMail,review:renderReview,accounts:renderAccounts,monitoring:renderMonitoring,draft:renderDraft,setup:renderSetup})[state.view]();
+    main.innerHTML = ({overview:renderOverview,mail:renderMail,review:renderReview,accounts:renderAccounts,monitoring:renderMonitoring,draft:renderDraft,setup:renderSetup})[state.view]();
+    if (keptEdits) restoreBrandEdits(keptEdits,keptFocus?.id,keptSelection);
+    // A focused control that left with the old page must not strand keyboard focus on the document.
+    if (hadFocus && !main.contains(document.activeElement)) ($('#today-status') || main).focus({preventScroll:true});
     state.communicationSignature = communicationSignature();
     state.sourceSignature = sourceStateSignature();
     if (state.view === 'draft') updateDraftResult();
@@ -298,8 +345,11 @@
   function emptyState(title, text, action = '', symbol = 'review') {
     return `<div class="empty-state panel"><div class="empty-icon">${icon(symbol)}</div><h2>${esc(title)}</h2><p>${esc(text)}</p>${action}</div>`;
   }
-  const addAccountButton = (label = 'Add account') => `<button class="button primary" data-action="add-account">${icon('plus')}${esc(label)}</button>`;
-  const addReviewButton = () => `<button class="button quiet" data-action="add-review">${icon('plus')}Add feedback</button><button class="button primary" data-action="add-excerpt">${icon('review')}Check a post</button>`;
+  const addAccountButton = (label = 'Add account', primary = true) => `<button class="button ${primary ? 'primary' : 'quiet'}" data-action="add-account">${icon('plus')}${esc(label)}</button>`;
+  // One paste control everywhere: with no saved account it opens the text-first walk, never an account form.
+  const pasteLabel = () => state.data?.accounts.length ? 'Paste a post' : 'Paste my first post';
+  const pasteButton = (primary = false) => `<button class="button ${primary ? 'primary' : 'quiet'}" data-action="add-excerpt">${icon('review')}${pasteLabel()}</button>`;
+  const addReviewButton = () => `<button class="button quiet" data-action="add-review">${icon('plus')}Add feedback</button>${pasteButton(true)}`;
   function todaySourceBuckets() {
     const buckets = {needs_you:[],waiting:[],verification_pending:[]}, seen = new Set();
     sourceItems().forEach(item => {
@@ -309,13 +359,20 @@
     });
     return buckets;
   }
+  function todayStatus(buckets = todaySourceBuckets()) {
+    const needs = buckets.needs_you.length, pending = buckets.waiting.length + buckets.verification_pending.length;
+    if (needs) return `${needs} ${needs === 1 ? 'post needs' : 'posts need'} your decision.`;
+    if (!sourceItems().length) return 'Nothing saved yet. Paste a post to get a first check.';
+    return `Nothing needs your decision right now. This covers only what is saved here, not your whole account.${pending ? ` ${pending} ${pending === 1 ? 'item is' : 'items are'} still waiting or not confirmed yet.` : ''}`;
+  }
   function todaySummary() {
     const buckets = todaySourceBuckets();
-    return `<section class="today-summary terminal-panel" aria-label="Today at a glance"><button data-action="review-filter" data-status="needs_you"><span>Needs you</span><strong>${buckets.needs_you.length}</strong></button><button data-action="review-filter" data-status="waiting"><span>Waiting</span><strong>${buckets.waiting.length}</strong></button><button data-action="review-filter" data-status="verification_pending"><span>Verification</span><strong>${buckets.verification_pending.length}</strong></button><button data-action="navigate" data-view="mail"><span>Saved mail</span><strong>${communicationList('messages').length}</strong></button></section>${todayKept()}`;
+    const tile = (label, count, attributes) => `<button ${attributes}><span>${label}</span><strong>${count}</strong></button>`;
+    return `<p class="today-status" id="today-status" tabindex="-1">${esc(todayStatus(buckets))}</p><section class="today-summary terminal-panel" aria-label="Today at a glance">${tile('Needs you',buckets.needs_you.length,'data-action="review-filter" data-status="needs_you"')}${tile('Waiting on assistant',buckets.waiting.length,'data-action="review-filter" data-status="waiting"')}${tile('Not confirmed yet',buckets.verification_pending.length,'data-action="review-filter" data-status="verification_pending"')}${tile('Saved mail',communicationList('messages').length,'data-action="navigate" data-view="mail"')}</section>`;
   }
   function todayKept() {
     const kept = sourceItems().filter(item => item.status === 'kept').length;
-    return `<p class="today-kept"><span><strong>${kept}</strong> kept ${kept === 1 ? 'post' : 'posts'}. Your choices are saved here; nothing on the platform changed.</span><button class="text-button" data-action="review-filter" data-status="history">View saved posts ${icon('arrow')}</button></p>`;
+    return `<p class="today-kept"><span><strong>${kept}</strong> kept ${kept === 1 ? 'post' : 'posts'}. Your choices are saved here; nothing on the platform changed.</span><span class="today-kept-links"><button class="text-button" data-action="review-filter" data-status="history">View saved posts ${icon('arrow')}</button><a class="text-button" ${downloadAttributes('/api/brief')}>${icon('download')}Export brief</a></span></p>`;
   }
   function todayReportContent() {
     const run = monitorRuns()[0];
@@ -328,9 +385,13 @@
   function todayReport() {
     return `<section class="today-report terminal-panel"><div class="section-heading"><div><div class="eyebrow">LATEST SAVED REPORT</div><h2>Latest assistant report</h2></div></div><div id="today-report-content">${todayReportContent()}</div></section>`;
   }
+  // The count is real text in the control's name, so a screen reader hears it.
+  const todayCount = (count, status, label) => `<button class="section-count count-button" data-action="review-filter" data-status="${esc(status)}" aria-label="Open ${esc(label)}: ${count}">${count}</button>`;
+  // A panel exists only while it has something in it; its refresh container stays and is empty otherwise.
   function todayNeedsYou() {
     const items = todaySourceBuckets().needs_you, previews = items.slice(0,3);
-    return `<div class="section-heading"><div><h2>Needs you <button class="section-count count-button" data-action="review-filter" data-status="needs_you" aria-label="Open needs-you posts">${items.length}</button></h2><p>Saved sources that need a decision.</p></div><button class="text-button" data-action="review-filter" data-status="needs_you">All needs-you posts ${icon('arrow')}</button></div>${previews.length ? `<div class="review-stack">${previews.map(item => sourceCard(item,true)).join('')}</div>${items.length > previews.length ? `<p class="preview-limit">Showing ${previews.length} of ${items.length}. Posts has the complete list.</p>` : ''}` : `<div class="today-empty"><strong>No needs-you items recorded.</strong><p>This describes the saved source evidence. It is not an account audit. Check a post to add something you want to consider.</p><button class="text-button" data-action="add-excerpt">Check a post</button></div>`}`;
+    if (!items.length) return '';
+    return `<section class="terminal-panel" id="today-needs-you"><div class="section-heading"><div><h2>Needs you ${todayCount(items.length,'needs_you','needs-you posts')}</h2></div><button class="text-button" data-action="review-filter" data-status="needs_you">All needs-you posts ${icon('arrow')}</button></div><div class="review-stack">${previews.map(item => sourceCard(item,true)).join('')}</div>${items.length > previews.length ? `<p class="preview-limit">Showing ${previews.length} of ${items.length}. Posts has the complete list.</p>` : ''}</section>`;
   }
   function inboxAge(value) {
     const elapsed = Date.now() - new Date(value).getTime();
@@ -357,9 +418,10 @@
     return `<article class="inbox-card" data-request-id="${esc(request.id)}"><div class="review-metadata"><span class="badge ${request.state === 'needs_review' ? 'attention' : request.state === 'done' ? 'strength' : 'suggestion'}">${esc(inboxStateLabel[request.state] || request.state)}</span><span>${esc(account?.platform || 'Account')} · ${esc(handleOf(account) || 'Account not saved')}</span><span>${esc(kindLabel[request.kind] || 'Comment')}</span><time datetime="${esc(request.observed_at)}" title="${esc(dateText(request.observed_at,true))}">Read ${esc(inboxAge(request.observed_at))}</time></div><blockquote class="review-excerpt">${esc(request.text)}</blockquote>${request.revision > 1 && request.state === 'needs_review' ? `<p class="inbox-note">The comment changed after an earlier request (${esc(String(earlier))} earlier ${earlier === 1 ? 'version' : 'versions'} kept). Its old evaluation no longer applies.</p>` : ''}${request.evaluation ? `<div class="inbox-detail"><span class="detail-label">Evaluation</span><p>${esc(trimText(request.evaluation,300))}</p></div>` : ''}${request.proposal ? `<div class="inbox-detail"><span class="detail-label">Proposed ${esc(request.proposal_kind === 'edit' ? 'edit' : 'reply')} · not sent</span><p>${esc(trimText(request.proposal,300))}</p></div>` : ''}${request.state === 'done' ? `<p class="inbox-note">${esc(request.handled_note)}</p>` : ''}<p class="inbox-note">${esc(request.outcome)}</p><p class="inbox-note">Own-account check: reported by your assistant ${esc(dateText(proof.checked_at,true))}. The platform did not confirm it.</p><div class="review-card-footer"><span class="inbox-links">${sourceLink(request.source_url,'Open comment')}${request.parent_url ? sourceLink(request.parent_url,'Open parent post') : ''}</span><div class="quick-actions">${inboxControls(request)}</div></div></article>`;
   }
   function todayRequests() {
-    const items = requestInbox(), waiting = items.filter(request => ['needs_review','prepared'].includes(request.state)), previews = waiting.slice(0,4);
+    const waiting = requestInbox().filter(request => ['needs_review','prepared'].includes(request.state)), previews = waiting.slice(0,4);
+    if (!waiting.length) return '';
     const intro = 'Public comments addressed to RES that your assistant has read and imported. Resonance cannot watch for them or react instantly: ask your assistant to check and import. Nothing here runs or publishes.';
-    return `<div class="section-heading"><div><h2>RES requests <span class="section-count">${waiting.length}</span></h2><p>${esc(intro)}</p></div></div>${previews.length ? `<div class="review-stack">${previews.map(inboxCard).join('')}</div>${waiting.length > previews.length ? `<p class="preview-limit">Showing ${previews.length} of ${waiting.length} open requests. Your assistant can list the rest.</p>` : ''}` : `<div class="today-empty"><strong>No open RES requests saved.</strong><p>${items.length ? `${items.length} handled or dismissed ${items.length === 1 ? 'request is' : 'requests are'} kept on this computer.` : 'Ask your assistant to look for comments you left addressed to RES, and to import any it finds.'}</p></div>`}`;
+    return `<section class="terminal-panel" id="today-requests"><div class="section-heading"><div><h2>RES requests <span class="section-count">${waiting.length}</span></h2><p>${esc(intro)}</p></div></div><div class="review-stack">${previews.map(inboxCard).join('')}</div>${waiting.length > previews.length ? `<p class="preview-limit">Showing ${previews.length} of ${waiting.length} open requests. Your assistant can list the rest.</p>` : ''}</section>`;
   }
   async function updateInboxRequest(button) {
     const request = requestInbox().find(item => item.id === button.dataset.id);
@@ -379,27 +441,29 @@
   }
   function todayWaiting() {
     const {waiting,verification_pending:verification} = todaySourceBuckets();
-    const group = (title,copy,status,items) => `<section class="today-work-group"><div class="today-work-heading"><div><h3>${esc(title)} <button class="section-count count-button" data-action="review-filter" data-status="${esc(status)}" aria-label="Open ${esc(title)} posts">${items.length}</button></h3><p>${esc(copy)}</p></div><button class="text-button" data-action="review-filter" data-status="${esc(status)}">View all ${icon('arrow')}</button></div>${items.length ? `<div class="review-stack compact">${items.slice(0,2).map(item => sourceCard(item,true)).join('')}</div>${items.length > 2 ? `<p class="preview-limit">Showing 2 of ${items.length}. Posts has the complete list.</p>` : ''}` : `<p class="today-empty-inline">No ${status === 'waiting' ? 'waiting work' : 'verification work'} recorded. Open Posts to choose your next move.</p><button class="text-button" data-action="navigate" data-view="review">Open Posts</button>`}</section>`;
-    return group('Waiting','Queued or running assistant work. A schedule is not a completion promise.','waiting',waiting) + group('Verification','Completed-by-you or uncertain attempts still awaiting evidence.','verification_pending',verification);
+    const group = (id,title,copy,status,items) => !items.length ? '' : `<section class="terminal-panel today-work-group" id="today-${id}"><div class="today-work-heading"><div><h2>${esc(title)} ${todayCount(items.length,status,`${title.toLowerCase()} posts`)}</h2><p>${esc(copy)}</p></div><button class="text-button" data-action="review-filter" data-status="${esc(status)}">View all ${icon('arrow')}</button></div><div class="review-stack compact">${items.slice(0,2).map(item => sourceCard(item,true)).join('')}</div>${items.length > 2 ? `<p class="preview-limit">Showing 2 of ${items.length}. Posts has the complete list.</p>` : ''}</section>`;
+    return group('waiting','Waiting on assistant','You asked for a change. It has not been done yet; a scheduled time is not a promise.','waiting',waiting) + group('verification','Not confirmed yet','A change was made or tried. Resonance has not seen proof on the platform.','verification_pending',verification);
   }
   function todayMail() {
     const messages = communicationList('messages').slice().sort((a,b) => new Date(b.received_at || 0) - new Date(a.received_at || 0));
     const previews = messages.slice(0,3);
-    if (!previews.length) return `<div class="today-empty"><strong>No saved mail previews.</strong><p>Mailbox profiles alone do not provide inbox access. Ask your assistant to bring in a mail preview.</p><button class="text-button" data-action="connect-assistant">Connect your assistant</button></div>`;
-    return `<div class="today-mail-list">${previews.map(message => { const account = accountById(message.account_id), draft = draftForMessage(message.id); return `<button class="today-mail-row" data-action="mail-message" data-id="${esc(message.id)}"><span class="today-mail-meta"><strong>${esc(message.sender || 'Sender not recorded')}</strong><time datetime="${esc(message.received_at)}">Received ${esc(dateText(message.received_at,true))}</time></span><span class="today-mail-subject">${esc(message.subject || 'No subject')}</span><span class="today-mail-preview">${esc(trimText(message.preview || 'No preview was saved.',120))}</span><span class="today-mail-account">${esc(account?.platform || 'Mail account')} · ${esc(handleOf(account) || 'Mailbox not recorded')} · Saved ${esc(dateText(message.imported_at || message.received_at,true))}${draft ? ' · Draft saved' : ''}</span></button>`; }).join('')}</div>${messages.length > previews.length ? `<p class="preview-limit">Showing ${previews.length} of ${messages.length} saved previews.</p>` : ''}`;
+    if (!previews.length) return '';
+    return `<section class="terminal-panel" id="today-mail"><div class="section-heading"><div><h2>Saved mail <button class="section-count count-button" data-action="navigate" data-view="mail" aria-label="Open saved mail: ${messages.length}">${messages.length}</button></h2><p>Local previews and reply drafts.</p></div><button class="text-button" data-action="navigate" data-view="mail">Open Mail ${icon('arrow')}</button></div><div class="today-mail-list">${previews.map(message => { const account = accountById(message.account_id), draft = draftForMessage(message.id); return `<button class="today-mail-row" data-action="mail-message" data-id="${esc(message.id)}"><span class="today-mail-meta"><strong>${esc(message.sender || 'Sender not recorded')}</strong><time datetime="${esc(message.received_at)}">Received ${esc(dateText(message.received_at,true))}</time></span><span class="today-mail-subject">${esc(message.subject || 'No subject')}</span><span class="today-mail-preview">${esc(trimText(message.preview || 'No preview was saved.',120))}</span><span class="today-mail-account">${esc(account?.platform || 'Mail account')} · ${esc(handleOf(account) || 'Mailbox not recorded')} · Saved ${esc(dateText(message.imported_at || message.received_at,true))}${draft ? ' · Draft saved' : ''}</span></button>`; }).join('')}</div>${messages.length > previews.length ? `<p class="preview-limit">Showing ${previews.length} of ${messages.length} saved previews.</p>` : ''}</section>`;
   }
+  // Never-checked alone is not unfinished work; unset boundaries, blocked, sign-in needed, unverified and recheck-due are.
+  const accountNeedsFinishing = account => { const unset = !account.identity_mode || account.identity_mode === 'unclassified'; return unset || !['verified','unknown'].includes(accessState(account).key); };
   function todayAccountAttention() {
-    const items = state.data.accounts.filter(account => accessState(account).key !== 'verified' || !account.identity_mode || account.identity_mode === 'unclassified');
-    if (!items.length) return `<div class="today-empty"><strong>No setup item recorded in current account evidence.</strong><p>This does not mean every account was audited or is currently reachable. Open Accounts to review the saved evidence.</p><button class="text-button" data-action="navigate" data-view="accounts">Open Accounts</button></div>`;
-    return `<div class="today-access-list">${items.slice(0,4).map(account => { const access = accessState(account), unset = !account.identity_mode || account.identity_mode === 'unclassified'; return `<button class="today-access-row" data-action="setup-account" data-id="${esc(account.id)}"><span>${platformIcon(account)}<span><strong>${esc(account.platform)} · ${esc(handleOf(account) || 'Identity not recorded')}</strong>${account.display_name && account.display_name !== account.handle ? `<small>${esc(account.display_name)}</small>` : ''}</span></span><span><em>${esc(access.label)}${access.record?.checked_at ? ` · ${esc(relativeDate(access.record.checked_at))}` : ''}</em>${unset ? '<small>Boundaries not set</small>' : ''}</span></button>`; }).join('')}</div>${items.length > 4 ? `<p class="preview-limit">Showing 4 of ${items.length} setup items.</p>` : ''}`;
+    const items = state.data.accounts.filter(accountNeedsFinishing);
+    if (!items.length) return '';
+    return `<section class="terminal-panel" id="today-accounts"><div class="section-heading"><div><h2>Accounts to finish <span class="section-count">${items.length}</span></h2><p>Boundaries not set, sign-in needed, blocked, or recheck due.</p></div><button class="text-button" data-action="navigate" data-view="accounts">Open Accounts ${icon('arrow')}</button></div><div class="today-access-list">${items.slice(0,4).map(account => { const access = accessState(account), unset = !account.identity_mode || account.identity_mode === 'unclassified'; return `<button class="today-access-row" data-action="setup-account" data-id="${esc(account.id)}"><span>${platformIcon(account)}<span><strong>${esc(account.platform)} · ${esc(handleOf(account) || 'Identity not recorded')}</strong>${account.display_name && account.display_name !== account.handle ? `<small>${esc(account.display_name)}</small>` : ''}</span></span><span><em>${esc(access.label)}${access.record?.checked_at ? ` · ${esc(relativeDate(access.record.checked_at))}` : ''}</em>${unset ? '<small>Boundaries not set</small>' : ''}</span></button>`; }).join('')}</div>${items.length > 4 ? `<p class="preview-limit">Showing 4 of ${items.length} accounts.</p>` : ''}</section>`;
   }
   function renderOverview() {
     if (!state.data.accounts.length && !state.data.reviews.length && !sourceItems().length && !monitorRuns().length && !communicationList('messages').length && !requestInbox().length) return renderWelcome();
-    const top = heading('Today.','Saved evidence. Clear next steps.', `<button class="button quiet" data-action="navigate" data-view="accounts">${icon('accounts')}Accounts</button><button class="button primary" data-action="add-excerpt">${icon('review')}Check a post</button><a class="button quiet" ${downloadAttributes('/api/brief')}>${icon('download')}<span class="desktop-label">Export brief</span><span class="sr-only">Download brief</span></a>`, new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}));
-    return top + readerTodaySection() + todayReport() + `<div id="today-summary-content">${todaySummary()}</div><div class="today-grid"><div class="today-main"><section class="terminal-panel" id="today-needs-you"><div id="today-needs-you-content">${todayNeedsYou()}</div></section><section class="terminal-panel" id="today-requests"><div id="today-requests-content">${todayRequests()}</div></section></div><aside class="today-side"><section class="terminal-panel" id="today-waiting"><div id="today-waiting-content">${todayWaiting()}</div></section><section class="terminal-panel" id="today-mail"><div class="section-heading"><div><h2>Saved mail <button class="section-count count-button" data-action="navigate" data-view="mail" aria-label="Open saved mail" id="today-mail-count">${communicationList('messages').length}</button></h2><p>Local previews and reply drafts.</p></div><button class="text-button" data-action="navigate" data-view="mail">Open Mail ${icon('arrow')}</button></div><div id="today-mail-content">${todayMail()}</div></section><section class="terminal-panel" id="today-accounts"><div class="section-heading"><div><h2>Account attention</h2><p>Saved access or boundary setup that needs a look.</p></div><button class="text-button" data-action="navigate" data-view="accounts">Open Accounts ${icon('arrow')}</button></div><div id="today-accounts-content">${todayAccountAttention()}</div></section></aside></div>`;
+    const date = new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+    return `<div class="page-heading today-heading"><div><div class="eyebrow">${esc(date)}</div><h1>Today</h1></div></div><div id="today-summary-content">${todaySummary()}</div>${readerTodaySection()}<div class="today-grid"><div class="today-main"><div class="today-slot" id="today-needs-you-content">${todayNeedsYou()}</div><div class="today-slot" id="today-requests-content">${todayRequests()}</div></div><div class="today-side"><div class="today-slot" id="today-waiting-content">${todayWaiting()}</div><div class="today-slot" id="today-mail-content">${todayMail()}</div><div class="today-slot" id="today-accounts-content">${todayAccountAttention()}</div></div></div>${todayReport()}<div id="today-kept-content">${todayKept()}</div>`;
   }
   function renderWelcome() {
-    return `<section class="welcome-panel panel"><div class="welcome-intro"><div class="eyebrow">WELCOME</div><h1>Resonance</h1><p class="welcome-pitch">${esc(WELCOME_PITCH)}</p></div><div class="welcome-doors"><button class="welcome-door" data-action="reader-setup"><span class="step-number">01</span><span><strong>Set up account checks</strong><small>Read your newest X and YouTube text in this browser. Preview.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="welcome-paste"><span class="step-number">02</span><span><strong>Paste my first post</strong><small>Paste your writing, then choose its account.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="start-samples"><span class="step-number">03</span><span><strong>Try samples</strong><small>Ten seconds, nothing to set up.</small></span>${icon('arrow')}</button></div><button class="welcome-privacy text-button" data-action="your-data">Everything stays in a folder on this computer. No account, no cloud, no tracking. ${icon('arrow')}</button></section>`;
+    return `<section class="welcome-panel panel"><div class="welcome-intro"><div class="eyebrow">WELCOME</div><h1>Check something you posted.</h1><p class="welcome-pitch">${esc(WELCOME_PITCH)}</p></div><div class="welcome-lead"><button class="button primary welcome-primary" data-action="welcome-paste">Paste my first post ${icon('arrow')}</button><p class="field-help">Two steps: your text and account, then how you want to show up.</p></div><h2 class="welcome-others-title">Other ways to start</h2><div class="welcome-doors"><button class="welcome-door" data-action="start-samples"><span><strong>Try samples</strong><small>Made-up posts. Nothing of yours is used.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="reader-setup"><span><strong>Set up account checks</strong><small>X and YouTube only. Preview: needs the separate browser reader already in this browser.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="connect-assistant"><span><strong>Ask my assistant</strong><small>If you already use an AI assistant that can drive a browser.</small></span>${icon('arrow')}</button><button class="welcome-door" data-action="choose-review"><span><strong>Choose a review</strong></span>${icon('arrow')}</button></div><button class="welcome-privacy text-button" data-action="your-data">Everything stays in a folder on this computer. No account, no cloud, no tracking. ${icon('arrow')}</button></section>`;
   }
   function requestOverview() {
     const requests = actionRequests();
@@ -516,7 +580,7 @@
     const run = selectedMonitorRun();
     const headingHtml = heading('Your check history.','What was seen, what was missed, and what happened next.',`<button class="button quiet" data-action="refresh-checks">${icon('monitoring')}Refresh reports</button>`,'SAVED REPORTS');
     const config = state.data.monitoring?.config;
-    const configPanel = `<section class="check-config panel"><div class="check-config-heading"><div>${icon('clock')}<strong>${esc(nextScheduledCheckText())}</strong></div>${config?.ends_at ? `<span>Window ${new Date(config.ends_at).getTime() <= Date.now() ? 'ended' : 'ends'} ${esc(dateText(config.ends_at,true))}</span>` : ''}</div><p>${esc(scheduleLabel())}. A check time is not an action-completion promise.</p>${config?.scope ? `<p>${esc(config.scope)}</p>` : ''}${config?.action_scope ? `<p class="check-action-scope"><strong>Action scope</strong>${esc(config.action_scope)}</p>` : ''}<p class="check-scope-note">${esc(monitoringScope())}</p><p class="check-assistant-note">Stay signed in in Chrome; keep this computer awake and unlocked, with your assistant available. Saved accounts are not live connections.</p>${!config?.enabled || !monitorRuns().length ? '<p class="check-setup-note">Your assistant manages the schedule in chat. This screen shows recorded setup and saved results.</p>' : ''}</section>`;
+    const configPanel = `<section class="check-config panel"><div class="check-config-heading"><div>${icon('clock')}<strong>${esc(nextScheduledCheckText())}</strong></div>${config?.ends_at ? `<span>Window ${new Date(config.ends_at).getTime() <= Date.now() ? 'ended' : 'ends'} ${esc(dateText(config.ends_at,true))}</span>` : ''}</div><p>${esc(scheduleLabel())}. A check time is not an action-completion promise.</p>${config?.scope ? `<p>${esc(config.scope)}</p>` : ''}${config?.action_scope ? `<p class="check-action-scope"><strong>Action scope</strong>${esc(config.action_scope)}</p>` : ''}<p class="check-scope-note">${esc(monitoringScope())}</p><p class="check-assistant-note">Use the browser your assistant can access; stay signed in there and keep this computer awake and unlocked for a check. Saved accounts are not live connections.</p>${!config?.enabled || !monitorRuns().length ? '<p class="check-setup-note">Your assistant manages the schedule in chat. This screen shows recorded setup and saved results.</p>' : ''}</section>`;
     const selector = monitorRuns().length ? `<div class="check-history-toolbar"><label for="check-run">Report</label><select id="check-run">${monitorRuns().map((item,index) => `<option value="${esc(item.id)}" ${item.id === run?.id ? 'selected' : ''}>${index === 0 ? 'Latest · ' : ''}${esc(dateText(item.completed_at || item.started_at,true))}${item.completed_at ? '' : ' · completion not recorded'}</option>`).join('')}</select><span>${monitorRuns().length} saved ${monitorRuns().length === 1 ? 'report' : 'reports'}</span></div>` : '';
     return headingHtml + `<div id="monitoring-content">${configPanel}${selector}${run ? `<section class="check-run-summary"><div class="section-heading"><h2>${run.id === monitorRuns()[0]?.id ? 'Latest check' : 'Earlier check'}</h2><span class="check-completion">${run.completed_at ? 'Completed' : 'Completion not recorded'}</span></div><p>${esc(run.summary || 'No summary was recorded.')}</p><div class="check-run-times"><span>Started ${esc(dateText(run.started_at,true))}</span><span>${run.completed_at ? `Completed ${esc(dateText(run.completed_at,true))}` : 'No completion time saved'}</span></div>${monitorCoverageLine(run)}${youtubeReceipts(run)}</section><section aria-label="Account reports" class="check-detail-grid">${monitorEntries(run).map(({account,report}) => monitorAccountCard(account,report,run)).join('')}</section>` : emptyState(state.data.monitoring ? 'The first report will appear here.' : 'Monitoring data is unavailable.',state.data.monitoring ? 'No check has been saved yet. A scheduled request is not proof that an account was checked. Ask your assistant for the first report in chat.' : 'The local app did not return a monitoring record. Try refreshing after the app has been updated. Your saved accounts and reviews are still available.',`<button class="button quiet" data-action="refresh-checks">Refresh reports ${icon('arrow')}</button>`,'monitoring')}</div>`;
   }
@@ -555,6 +619,7 @@
         [$('#today-needs-you-content'),() => todayNeedsYou()],
         [$('#today-waiting-content'),() => todayWaiting()],
         [$('#today-requests-content'),() => todayRequests()],
+        [$('#today-kept-content'),() => todayKept()],
       ].filter(([target]) => target);
       if (replacements.some(([target]) => target.contains(document.activeElement))) {state.sourceRefreshPending = true;return;}
       replacements.forEach(([target,html]) => {target.innerHTML = html();});
@@ -580,7 +645,7 @@
   function updateCommunicationView() {
     if (!state.data || dialog.open) {state.communicationRefreshPending = true;return;}
     const replacements = [];
-    if (state.view === 'overview') replacements.push([$('#today-summary-content'),() => todaySummary()],[$('#today-mail-count'),() => String(communicationList('messages').length)],[$('#today-mail-content'),() => todayMail()],[$('#today-accounts-content'),() => todayAccountAttention()]);
+    if (state.view === 'overview') replacements.push([$('#today-summary-content'),() => todaySummary()],[$('#today-mail-content'),() => todayMail()],[$('#today-accounts-content'),() => todayAccountAttention()],[$('#reader-today-content'),() => readerTodayContent()]);
     else if (state.view === 'accounts') {
       const results = $('#account-results');
       if (!results || !state.data.accounts.length) {
@@ -728,9 +793,11 @@
     const verified = accounts.filter(account => accessState(account).key === 'verified').length;
     return `${accounts.length} saved ${accounts.length === 1 ? 'identity' : 'identities'} · ${verified} with a fresh verified snapshot. Each account can be set up independently.`;
   }
+  const publicSignatureOptions = [['off','Off'],['compact','Short — RES'],['full','Full — RES and project link']];
   function renderSetup() {
     const brand = communication().brand || {};
-    return heading('Preferences.','Set your personal brand, manage identities, and see the saved daily schedule in any order.',`<button class="button quiet" data-action="navigate" data-view="overview">Back to Today</button>`,'SETUP') + `<div class="setup-options"><section class="setup-section terminal-panel" id="setup-identity"><div class="setup-section-head"><div><h2>Personal brand</h2><p>Describe how you want your own writing to sound.</p></div></div><form id="brand-form"><div class="form-grid"><div class="field full"><label for="brand-description">How I want to come across</label><textarea id="brand-description" name="description" maxlength="4000" placeholder="Grounded, direct, thoughtful…">${esc(brand.description)}</textarea></div><div class="field full"><label for="brand-audience">Who I speak to</label><textarea id="brand-audience" name="audience" maxlength="4000" placeholder="People, communities, clients…">${esc(brand.audience)}</textarea></div><div class="field"><label for="brand-voice">My voice</label><textarea id="brand-voice" name="voice" maxlength="4000" placeholder="Warm, concise, candid…">${esc(brand.voice)}</textarea></div><div class="field"><label for="brand-avoid">What to avoid</label><textarea id="brand-avoid" name="avoid" maxlength="4000" placeholder="Phrases, habits, tones…">${esc(brand.avoid)}</textarea></div></div><div class="inline-save-row"><span class="saved-state">${brand.updated_at ? `Saved ${esc(relativeDate(brand.updated_at))}` : 'Not saved yet'}</span><button class="button primary" type="submit">Save personal brand</button></div></form><p class="account-footnote">Personal brand guides your own writing. Account identity and safety boundaries are edited on each account.</p></section><aside class="setup-side"><section class="setup-section terminal-panel" id="setup-accounts"><div class="setup-section-head"><div><h2>Accounts</h2><p id="setup-accounts-summary">${esc(setupAccountsSummary())}</p></div></div><div class="setup-actions"><button class="button primary" data-action="navigate" data-view="accounts">Open Accounts ${icon('arrow')}</button>${addAccountButton()}</div><p class="connector-note">Gmail or Outlook connector access belongs to the assistant tools where it was configured. Resonance records evidence here; this page does not become a live mailbox connection.</p></section><section class="setup-section terminal-panel" id="setup-daily"><div class="setup-section-head"><div><h2>Daily schedule</h2><p>Read saved evidence after a check arrives.</p></div><span class="schedule-chip" id="setup-schedule">${esc(scheduleLabel())}</span></div><p>Editing preferences does not reschedule the assistant or prove that an account was reached.</p><button class="button quiet" data-action="navigate" data-view="monitoring">Open Checks ${icon('arrow')}</button></section></aside></div>`;
+    const signature = publicSignatureOptions.some(([key]) => key === brand.public_signature) ? brand.public_signature : 'off';
+    return heading('Preferences','Your personal brand and RES credit, your accounts, and the saved daily schedule, in any order.',`<button class="button quiet" data-action="navigate" data-view="overview">Back to Today</button>`,'YOUR WORKSPACE') + `<div class="setup-options"><section class="setup-section terminal-panel" id="setup-identity"><div class="setup-section-head"><div><h2>Personal brand</h2><p>Describe how you want your own writing to sound.</p></div></div><form id="brand-form"><div class="form-grid"><div class="field full"><label for="brand-description">How I want to come across</label><textarea id="brand-description" name="description" maxlength="4000" placeholder="Grounded, direct, thoughtful…">${esc(brand.description)}</textarea></div><div class="field full"><label for="brand-audience">Who I speak to</label><textarea id="brand-audience" name="audience" maxlength="4000" placeholder="People, communities, clients…">${esc(brand.audience)}</textarea></div><div class="field"><label for="brand-voice">My voice</label><textarea id="brand-voice" name="voice" maxlength="4000" placeholder="Warm, concise, candid…">${esc(brand.voice)}</textarea></div><div class="field"><label for="brand-avoid">What to avoid</label><textarea id="brand-avoid" name="avoid" maxlength="4000" placeholder="Phrases, habits, tones…">${esc(brand.avoid)}</textarea></div></div><section class="brand-credit" id="brand-credit" aria-labelledby="brand-credit-heading"><h3 id="brand-credit-heading">RES credit on public drafts</h3><div class="form-grid"><div class="field"><label for="brand-public-signature">Text signature</label><select id="brand-public-signature" name="public_signature" aria-describedby="brand-credit-help">${publicSignatureOptions.map(([key,label]) => `<option value="${key}" ${signature === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div class="field check-field"><label for="brand-public-banner"><input id="brand-public-banner" name="public_banner" type="checkbox" aria-describedby="brand-credit-help" ${brand.public_banner === true ? 'checked' : ''}><span>Include my approved RES banner</span></label></div></div><p class="field-help" id="brand-credit-help">Optional instructions for your assistant when creating new public posts or replies. Nothing is added or posted automatically. A banner needs an approved image supplied separately.</p></section><div class="inline-save-row"><span class="saved-state" id="brand-saved-state">${brand.updated_at ? `Saved ${esc(relativeDate(brand.updated_at))}` : 'Not saved yet'}</span><button id="brand-save" class="button primary" type="submit">Save personal brand</button></div></form><p class="account-footnote">Personal brand guides your own writing. Account identity and safety boundaries are edited on each account.</p></section><aside class="setup-side"><section class="setup-section terminal-panel" id="setup-accounts"><div class="setup-section-head"><div><h2>Accounts</h2><p id="setup-accounts-summary">${esc(setupAccountsSummary())}</p></div></div><div class="setup-actions"><button class="button primary" data-action="navigate" data-view="accounts">Open Accounts ${icon('arrow')}</button>${addAccountButton()}</div><p class="connector-note">Gmail or Outlook connector access belongs to the assistant tools where it was configured. Resonance records evidence here; this page does not become a live mailbox connection.</p></section><section class="setup-section terminal-panel" id="setup-daily"><div class="setup-section-head"><div><h2>Daily schedule</h2><p>Read saved evidence after a check arrives.</p></div><span class="schedule-chip" id="setup-schedule">${esc(scheduleLabel())}</span></div><p>Editing preferences does not reschedule the assistant or prove that an account was reached.</p><button class="button quiet" data-action="navigate" data-view="monitoring">Open Checks ${icon('arrow')}</button></section></aside></div>`;
   }
   function mailSyncSummary(account) {
     const sync = syncFor(account.id);
@@ -757,7 +824,7 @@
   }
   function brandGuide() {
     const brand = communication().brand || {};
-    if (!brandComplete()) return `<div class="brand-guide empty"><strong>Your personal brand is not set yet.</strong><button class="text-button" data-action="setup-identity">Add it in setup ${icon('arrow')}</button></div>`;
+    if (!brandComplete()) return `<div class="brand-guide empty"><strong>Your personal brand is not set yet.</strong><button class="text-button" data-action="setup-identity">Add it in Preferences ${icon('arrow')}</button></div>`;
     return `<div class="brand-guide"><div class="detail-label">YOUR VOICE, FOR REFERENCE</div>${brand.description ? `<p><strong>How you want to come across</strong>${esc(trimText(brand.description,220))}</p>` : ''}${brand.voice ? `<p><strong>Voice</strong>${esc(trimText(brand.voice,220))}</p>` : ''}${brand.audience ? `<p><strong>Audience</strong>${esc(trimText(brand.audience,220))}</p>` : ''}${brand.avoid ? `<p><strong>Avoid</strong>${esc(trimText(brand.avoid,220))}</p>` : ''}</div>`;
   }
   function mailMessageDialog(id) {
@@ -968,7 +1035,7 @@
   function queuedRequestText(request) {
     if (request?.execution_state !== 'queued' || !['edit','delete'].includes(request.action)) return '';
     const timing = request.scheduled_for ? `next check ${dateText(request.scheduled_for,true)}` : 'no next check is scheduled — ask your assistant to run your Resonance check';
-    return `Asked your assistant to ${request.action} · ${request.action === 'delete' ? 'not deleted yet' : 'not changed yet'} · ${timing} · it asks your yes first`;
+    return `Asked your assistant to ${request.action} · ${request.action === 'delete' ? 'not deleted yet' : 'not changed yet'} · ${timing} · needs your current permission`;
   }
   function scheduledText(request) {
     if (request.execution_state !== 'queued' || request.confirmation_required === true) return '';
@@ -985,7 +1052,7 @@
     return `<section class="request-section compact-work" id="action-requests" tabindex="-1" aria-labelledby="request-heading"><div><div class="eyebrow">ASSISTANT WORK</div><h2 id="request-heading"><button class="count-button" data-action="requests-explain">${active.length ? `${active.length} active ${active.length === 1 ? 'request' : 'requests'}` : 'No active requests'}</button></h2><p>Expected check times are not completion promises. Open a source for its exact request and history.</p></div><div class="compact-work-links"><button class="compact-work-link" data-action="review-status" data-status="waiting"><strong>${waiting}</strong><span>Waiting</span></button><button class="compact-work-link" data-action="review-status" data-status="verification_pending"><strong>${verification}</strong><span>Verification</span></button>${blocked ? `<button class="compact-work-link attention" data-action="review-status" data-status="needs_you"><strong>${blocked}</strong><span>Blocked or reopened</span></button>` : ''}${history.length ? `<button class="compact-work-link" data-action="review-status" data-status="history"><strong>${history.length}</strong><span>Request history</span></button>` : ''}</div></section>`;
   }
   function renderReview() {
-    if (!state.data.accounts.length) return heading('A little perspective.','Keep feedback you can act on. Leave the rest.', '', 'YOUR POSTS') + emptyState('An account comes first.','Add an account, then save a specific review or excerpt to consider.',addAccountButton(),'review');
+    if (!state.data.accounts.length) return heading('A little perspective.','Keep feedback you can act on. Leave the rest.', '', 'YOUR POSTS') + emptyState('Nothing saved yet.','Paste a post you wrote and Resonance checks it. You see the text box first and choose its account after.',`${pasteButton(true)}${addAccountButton('Add an account',false)}`,'review');
     const statusTabs = [['needs_you','Needs you'],['waiting','Waiting'],['verification_pending','Verification'],['snoozed','Snoozed'],['history','History'],['all','All']].map(([status,label]) => {
       const historyStates = ['kept','verified','checked','resolved'];
       const count = sourceItems().filter(item => status === 'all' || status === 'history' ? status === 'all' || historyStates.includes(item.status) : item.status === status).length;
@@ -1066,7 +1133,7 @@
     reader_unresponsive:'The reader stopped answering.',
     result_invalid:'The reader returned something Resonance could not verify.',
     more_available:'More recent items exist that this check did not read.',
-    fewer_than_limit:'Fewer than the three newest items were found.',
+    fewer_than_limit:'Fewer than three recent items were found.',
     not_signed_in:'The browser was not signed in to this site.',
     sign_in_needed:'The browser was not signed in to this site.',
   };
@@ -1105,8 +1172,8 @@
   function readerCheckProgress(withIds) {
     const check = readerClient?.check;
     if (!check) return '';
-    const titles = {arming:'Starting',beginning:'Starting',reading:'Reading in your browser',saving:'Saving',unknown:'Save status unknown',saved:'Saved',cancelled:'Cancelled',failed:'Stopped',discarded:'Discarded'};
-    const active = ['arming','beginning','reading','saving'].includes(check.phase);
+    const titles = {arming:'Starting',reconnecting:'Starting',beginning:'Starting',reading:'Reading in your browser',saving:'Saving',unknown:'Save status unknown',saved:'Saved',cancelled:'Cancelled',failed:'Stopped',discarded:'Discarded'};
+    const active = ['arming','reconnecting','beginning','reading','saving'].includes(check.phase);
     const rows = (check.entries || []).map(entry => `<li><span>${esc(`${entry.snapshot.platform} · ${entry.snapshot.handle || 'handle not recorded'}`)}</span><em>${esc(readerEntryText(entry))}</em></li>`).join('');
     const totals = check.phase === 'saved' && check.receipt?.totals ? `<p>${esc(readerTotalsText(check.receipt.totals))}</p>` : '';
     const buttons = [];
@@ -1121,26 +1188,47 @@
     const summary = state.data?.reader_check_summary;
     const latest = Array.isArray(summary?.recent) ? summary.recent[0] : null;
     if (!latest) return '<p class="field-help reader-latest">No browser check has been saved yet.</p>';
-    return `<div class="reader-latest"><div class="detail-label">${latest.origin === 'imported' ? 'LATEST IMPORTED CHECK' : 'LATEST SAVED CHECK'}</div><p><strong>${esc(dateText(latest.completed_at,true))}</strong> · ${esc(readerTotalsText(latest.totals))}</p><div class="reader-controls"><button class="button quiet small" data-action="reader-receipt" data-id="${esc(latest.id)}">View receipt</button><button class="text-button" data-action="reader-receipts">All saved checks (${readerNum(summary.count)})</button></div></div>`;
+    return `<div class="reader-latest"><div class="detail-label">${latest.origin === 'historical' ? 'LATEST IMPORTED CHECK' : 'LATEST SAVED CHECK'}</div><p><strong>${esc(dateText(latest.completed_at,true))}</strong> · ${esc(readerTotalsText(latest.totals))}</p><div class="reader-controls"><button class="button quiet small" data-action="reader-receipt" data-id="${esc(latest.id)}">View receipt</button><button class="text-button" data-action="reader-receipts">All saved checks (${readerNum(summary.count)})</button></div></div>`;
+  }
+  // Reader readiness picks the lead. Check now exists only where it can start; running or unresolved work leads with its own controls.
+  const readerSavedChecks = () => readerNum(state.data?.reader_check_summary?.count);
+  function readerLead() {
+    const readable = state.data.accounts.filter(readerProvider), info = readerSetupState(), setup = readerClient?.setup || {};
+    const samples = showingSamples();
+    const siteAllowed = account => setup[account.platform === 'X' ? 'x' : 'youtube'] === true;
+    const usable = !samples && !!readerClient && readable.length > 0 && (['ready','offline'].includes(info.key) || (info.key === 'permission' && readable.some(siteAllowed)));
+    // While the reader is still being looked for, keep a known browser-check workspace from flipping its lead.
+    const probing = !samples && !!readerClient && info.key === 'checking' && readable.length > 0 && readerSavedChecks() > 0;
+    const check = readerClient?.check;
+    const progressLeads = !!check && ((check.phase === 'unknown' && check.canRetry) || check.phase === 'saved');
+    return {readable,info,samples,usable,probing,progressLeads};
   }
   function readerTodayContent() {
-    const readable = state.data.accounts.filter(readerProvider).length;
-    const disabled = !readerCanCheck() || readerBusy();
-    const intro = readable ? 'Reads the newest posts and replies you wrote on X, and your newest comments on YouTube, in this browser. Nothing is saved until the whole check finishes.' : 'None of your saved accounts is on X or YouTube yet, so there is nothing to read automatically. Pasting text and your own assistant still work.';
-    const notReady = !showingSamples() && ['absent','unavailable','version','blocked'].includes(readerSetupState().key);
-    const checkNow = `<button id="res-check-now" class="button ${notReady ? 'quiet' : 'primary'}" data-action="reader-check-all" ${disabled || notReady ? 'disabled' : ''}>${icon('search')}Check now</button>`;
-    const setupButton = '<button class="button quiet" data-action="reader-setup">Set up account checks</button>';
-    const pasteButton = `<button class="button ${notReady ? 'primary' : 'quiet'}" data-action="add-excerpt">Paste text</button>`;
-    const doors = notReady ? `${pasteButton}${checkNow}${setupButton}` : `${checkNow}${setupButton}${pasteButton}`;
-    return `<div class="section-heading"><div><h2>Check now</h2><p>${esc(notReady ? 'Account checks are not set up in this browser, so paste text you wrote to check it now. Nothing is read automatically.' : intro)}</p></div></div><div class="reader-controls">${doors}<button class="button quiet" data-action="connect-assistant">Ask my assistant</button></div>${readerStateLine()}${readerCheckProgress(readerDialogKind !== 'check')}${readerLatestHtml()}`;
+    const {readable,info,samples,usable,probing,progressLeads} = readerLead();
+    const checkLead = !progressLeads && (usable || probing);
+    const disabled = !readerCanCheck() || readerBusy() || probing;
+    const label = account => `${account.platform} · ${handleOf(account) || 'handle not recorded'}`;
+    const others = state.data.accounts.filter(account => !readerProvider(account));
+    const checkNow = usable || probing ? `<button id="res-check-now" class="button ${checkLead ? 'primary' : 'quiet'}" data-action="reader-check-all" ${disabled ? 'disabled' : ''}>${icon('search')}Check now</button>` : '';
+    const setupButton = `<button class="button quiet" data-action="reader-setup">Set up account checks</button>`;
+    const assistantButton = '<button class="button quiet" data-action="connect-assistant">Ask my assistant</button>';
+    let explain;
+    if (usable || probing) explain = `<p>Will read: ${esc(readable.map(label).join(', '))}. Up to three recent own items each, text only: posts from the main X timeline (not replies to other people) or YouTube comments, in this browser. Nothing is saved until the whole check finishes.${readable.some(account => account.platform === 'YouTube') ? ' A YouTube check needs an English-language interface and may update your watch history or start playback before it pauses.' : ''}</p>${others.length ? `<p class="field-help">Not read automatically: ${esc(others.map(label).join(', '))}. Paste a post, or ask your assistant.</p>` : ''}`;
+    else if (samples) explain = '<p>Sample data is never read from a real account, so Check now is not offered. Pasting a post here practices in the sample workspace only. Clear the samples to check your own accounts.</p>';
+    else if (!readable.length) explain = '<p>Check now reads X and YouTube accounts in this browser. None of your saved accounts is on X or YouTube yet, so there is nothing to read automatically. Pasting a post and your own assistant still work.</p>';
+    else explain = '<p>Check now reads X and YouTube accounts in this browser through a separate reader. It is not ready here, so paste a post to check it now. Nothing is read automatically.</p>';
+    const stateLine = info.key === 'ready' || samples || !readable.length ? '' : readerStateLine();
+    const actions = `${checkLead ? `${checkNow}${pasteButton(false)}` : `${progressLeads ? checkNow : ''}${pasteButton(!progressLeads)}${progressLeads ? '' : checkNow}`}${setupButton}${assistantButton}`;
+    const latest = readerSavedChecks() || state.data?.reader_check_summary?.recent?.length || usable ? readerLatestHtml() : '';
+    return `<div class="section-heading"><div><h2>Next step</h2></div></div>${explain}${stateLine}${readerCheckProgress(readerDialogKind !== 'check')}<div class="reader-controls reader-lead">${actions}</div>${latest}`;
   }
-  const readerTodaySection = () => `<section class="terminal-panel reader-today" id="reader-today" aria-label="Check now"><div id="reader-today-content">${readerTodayContent()}</div></section>`;
+  const readerTodaySection = () => `<section class="terminal-panel reader-today" id="reader-today" aria-label="Next step"><div id="reader-today-content">${readerTodayContent()}</div><button class="button quiet reader-review-button" data-action="choose-review">Choose a review</button></section>`;
 
   function readerAccountBody(id) {
     const account = accountById(id);
     if (!account) return '<p>This account is no longer saved.</p>';
     const disabled = !readerCanCheck() || readerBusy();
-    return `<p>Resonance asks the browser reader to read up to three of the newest things you wrote on this account, then checks that text against its boundaries. It reads text only: not images, video or the conversation around an item. It never posts, edits or deletes anything.</p>${readerStateLine()}<div class="reader-controls"><button id="res-check-account" class="button primary" data-action="reader-check-account" data-id="${esc(id)}" ${disabled ? 'disabled' : ''}>${icon('search')}Check this account now</button><button class="text-button" data-action="reader-corpus" data-id="${esc(id)}">See what was read</button></div>${readerCheckProgress(true)}`;
+    return `<p>Resonance asks the browser reader to read up to three recent own X main-timeline posts or YouTube comments on this account, then checks that text against its boundaries. It reads text only: not images, video or the conversation around an item. It never posts, edits or deletes anything.</p>${readerStateLine()}<div class="reader-controls"><button id="res-check-account" class="button primary" data-action="reader-check-account" data-id="${esc(id)}" ${disabled ? 'disabled' : ''}>${icon('search')}Check this account now</button><button class="text-button" data-action="reader-corpus" data-id="${esc(id)}">See what was read</button></div>${readerCheckProgress(true)}`;
   }
   function readerAccountDialog(id) {
     const account = accountById(id);
@@ -1155,7 +1243,7 @@
     const options = readerClient && ['ready','permission','version','offline'].includes(info.key) ? '<button id="res-reader-options" class="button primary" data-action="reader-options">Open reader settings</button>' : '';
     const again = readerClient && !showingSamples() ? '<button class="button quiet" data-action="reader-probe">Look again</button>' : '';
     const hasAccounts = state.data.accounts.length > 0;
-    const alternatives = info.key === 'ready' ? '' : `<p class="field-help">Until the reader is ready you can still ${hasAccounts ? 'paste text you wrote' : 'paste your first post'}, ask your own assistant, or add an account by hand.</p><div class="reader-controls"><button class="button quiet" data-action="${hasAccounts ? 'add-excerpt' : 'welcome-paste'}">${hasAccounts ? 'Paste text' : 'Paste my first post'}</button><button class="button quiet" data-action="connect-assistant">Ask my assistant</button><button class="button quiet" data-action="add-account">Add an account by hand</button></div>`;
+    const alternatives = info.key === 'ready' ? '' : `<p class="field-help">Until the reader is ready you can still ${hasAccounts ? 'paste text you wrote' : 'paste your first post'}, ask your own assistant, or add an account by hand.</p><div class="reader-controls"><button class="button quiet" data-action="add-excerpt">${pasteLabel()}</button><button class="button quiet" data-action="connect-assistant">Ask my assistant</button><button class="button quiet" data-action="add-account">Add an account by hand</button></div>`;
     return `${readerStateLine()}<div class="reader-controls">${options}${again}</div>${alternatives}`;
   }
   function readerSetupDialog(message = '') {
@@ -1163,10 +1251,10 @@
     const facts = ['The browser reader is a preview and is not in a browser store yet, so there is no install link here and Resonance cannot install it for you. Checks work only where it is already present.',
       'Resonance looks for the reader in this same browser. If you open Resonance in a different browser, it will not be found there.',
       'Each site is a separate permission you choose in reader settings. Browsers grant that access for the whole site (all of x.com; YouTube and Google My Activity), even though the reader only uses routes for your own content. You can remove a permission at any time.',
-      'It reads only text you wrote: your posts and replies on X, and your comments on YouTube. Each check reads at most the 3 newest items per account.',
+      'It reads up to three recent own posts from the main X profile timeline (not replies to other people), or YouTube comments, per account. The current YouTube reader requires an English-language interface.',
       'It does not scan images, video, or the conversation around an item.',
       'YouTube checks use a separate visible browser window while they run.',
-      'It never posts, edits, deletes or changes anything, and it never sees your passwords. A check saves its results only after every account has finished; cancelling discards everything read.'];
+      'It never publishes, edits or deletes content, and it never sees your passwords. Opening YouTube comment videos may update your watch history or start playback before the reader pauses it. A check saves its results only after every account has finished; cancelling discards everything read.'];
     const body = `<ul class="reader-facts">${facts.map(item => `<li>${esc(item)}</li>`).join('')}</ul><div id="reader-setup-live">${readerSetupLive()}</div><div id="reader-discovery-live">${discoveryHtml()}</div>`;
     openDialog(dialogShell('Set up account checks','Browser reader preview',body,'<button class="button quiet" data-action="close-dialog">Close</button>'));
     readerDialogKind = 'setup';
@@ -1377,7 +1465,7 @@
   function readerAccountBlock(account) {
     const id = esc(account.id);
     if (!readerProvider(account)) return `<div class="dialog-subsection reader-account-block"><h3>Browser checks</h3><p class="detail-text"><strong>Saved · automatic checking not available yet</strong></p><p class="field-help">Resonance can only read X and YouTube so far. Saving this profile does not connect it. Paste text you wrote, or ask your own assistant.</p><div class="reader-controls"><button class="button quiet" data-action="add-excerpt" data-account="${id}">Paste text</button><button class="button quiet" data-action="connect-assistant">Ask my assistant</button></div></div>`;
-    return `<div class="dialog-subsection reader-account-block"><h3>Browser checks</h3><p class="detail-text">Saving this profile does not connect it. A check reads up to three of your newest items in this browser.</p><div class="reader-controls"><button class="button primary" data-action="reader-account-dialog" data-id="${id}" ${readerCanCheck() ? '' : 'disabled'}>${icon('search')}Check this account now</button>${showingSamples() ? '' : `<button class="text-button" data-action="reader-corpus" data-id="${id}">See what was read</button>`}</div></div>`;
+    return `<div class="dialog-subsection reader-account-block"><h3>Browser checks</h3><p class="detail-text">Saving this profile does not connect it. A check reads up to three recent own X main-timeline posts or YouTube comments in this browser.</p><div class="reader-controls"><button class="button primary" data-action="reader-account-dialog" data-id="${id}" ${readerCanCheck() ? '' : 'disabled'}>${icon('search')}Check this account now</button>${showingSamples() ? '' : `<button class="text-button" data-action="reader-corpus" data-id="${id}">See what was read</button>`}</div></div>`;
   }
 
   // Saved receipt: what was read and what was not, with no safety score.
@@ -1408,7 +1496,7 @@
   }
   function readerReceiptsDialog() {
     const recent = Array.isArray(state.data?.reader_check_summary?.recent) ? state.data.reader_check_summary.recent : [];
-    const rows = recent.length ? recent.map(item => `<button class="check-account-row" data-action="reader-receipt" data-id="${esc(item.id)}"><span><strong>${esc(dateText(item.completed_at,true))}</strong><small>${esc(readerTotalsText(item.totals))}${item.origin === 'imported' ? ' Imported history.' : ''}</small></span></button>`).join('') : '<p>No browser check has been saved yet.</p>';
+    const rows = recent.length ? recent.map(item => `<button class="check-account-row" data-action="reader-receipt" data-id="${esc(item.id)}"><span><strong>${esc(dateText(item.completed_at,true))}</strong><small>${esc(readerTotalsText(item.totals))}${item.origin === 'historical' ? ' Imported history.' : ''}</small></span></button>`).join('') : '<p>No browser check has been saved yet.</p>';
     openDialog(dialogShell('Saved checks',`Showing the ${recent.length} most recent`,`<div class="reader-receipt-list">${rows}</div>`,'<button class="button quiet" data-action="close-dialog">Close</button>'));
     readerDialogKind = 'receipts';
   }
@@ -1476,6 +1564,7 @@
   }
   function openDialog(html) {
     readerDialogKind = '';
+    endAsk();
     if (!dialog.open) dialogReturnFocus = document.activeElement;
     $('#dialog-content').innerHTML = html;
     if (!dialog.open) dialog.showModal();
@@ -1488,6 +1577,87 @@
     cancelFirstPost();
     dialog.close();
     if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({preventScroll:true});
+  }
+  // Unsaved writing. A person's own dismissal (Escape, a press that starts and ends on the backdrop, Close,
+  // Cancel, or Back out of a typed step) asks first; closes that follow a save or a move to another view do not.
+  let discardAsk = null;
+  let backdropPress = false;
+  function fieldChanged(field) {
+    const type = String(field.type || '').toLowerCase();
+    if (['hidden','button','submit','reset','image'].includes(type)) return false;
+    if (type === 'file') return !!field.files?.length;
+    if (type === 'checkbox' || type === 'radio') return field.checked !== field.defaultChecked;
+    if (field.tagName === 'SELECT') {
+      const options = [...field.options];
+      return field.multiple ? options.some(option => option.selected !== option.defaultSelected) : field.selectedIndex !== Math.max(0,options.findIndex(option => option.defaultSelected));
+    }
+    return field.value !== field.defaultValue;
+  }
+  // Review scope selections prepare a request and contain no writing to protect on dismissal.
+  const dialogFieldsChanged = () => [...dialog.querySelectorAll('textarea,input,select')].some(field =>
+    !['review-mode-account','review-mode-scope'].includes(field.id) && fieldChanged(field));
+  function dialogHasWriting() {
+    const walk = accountWalk;
+    if (walk?.route === 'first-post') {
+      // A save in flight or an unconfirmed response keeps its own close rules (and its notice), unchanged.
+      if (walk.posting || walk.uncertain || walk.excerptSaved || firstPostStale(walk)) return false;
+      if (String(walk.text || '').trim()) return true;
+    }
+    return dialogFieldsChanged();
+  }
+  function endAsk() {
+    const ask = discardAsk;
+    if (!ask) return null;
+    discardAsk = null;
+    ask.panel.remove();
+    ask.hidden.forEach(node => {node.style.display = '';});
+    dialog.setAttribute('aria-labelledby',ask.labelled);
+    return ask;
+  }
+  function askDiscard(onDiscard) {
+    const content = $('#dialog-content');
+    const holder = document.activeElement;
+    const hidden = [...(content.children || [])];
+    hidden.forEach(node => {node.style.display = 'none';});
+    const panel = document.createElement('div');
+    panel.style.display = 'contents';
+    panel.innerHTML = dialogShell('Discard what you wrote?','Closing now removes it.','<p class="detail-text">Keep writing returns to everything as you left it. Copy it first if you want to keep it.</p>','<button class="button quiet" type="button" data-action="keep-writing">Keep writing</button><button class="button primary" type="button" data-action="discard-writing">Discard</button>').replace(' id="dialog-title"',' id="discard-title"').replace(' id="dialog-error"','');
+    content.appendChild(panel);
+    discardAsk = {panel,hidden,holder,labelled:'dialog-title',onDiscard};
+    dialog.setAttribute('aria-labelledby','discard-title');
+    $('[data-action="keep-writing"]',panel)?.focus({preventScroll:true});
+  }
+  function keepWriting() {
+    const ask = endAsk();
+    if (!ask) return;
+    (ask.holder?.isConnected ? ask.holder : $('input:not([type=hidden]),select,textarea',dialog))?.focus({preventScroll:true});
+  }
+  function discardWriting() {endAsk()?.onDiscard();}
+  function requestCloseDialog(onDiscard = closeDialog) {
+    if (discardAsk) {keepWriting();return;}
+    if (dialog.open && dialogHasWriting()) askDiscard(onDiscard);
+    else onDiscard();
+  }
+  const onBackdrop = event => {
+    if (event.target !== dialog) return false;
+    const rect = dialog.getBoundingClientRect();
+    return event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
+  };
+  function dialogPress(event) {backdropPress = onBackdrop(event);}
+  function dialogBackdropClick(event) {
+    const began = backdropPress;
+    backdropPress = false;
+    if (began && onBackdrop(event)) requestCloseDialog();
+  }
+  function dialogKeydown(event) {
+    if (event.key !== 'Escape' || !dialog.open) return;
+    if (discardAsk) {event.preventDefault();keepWriting();}
+    else if (dialogHasWriting()) {event.preventDefault();askDiscard(closeDialog);}
+  }
+  function dialogCancel(event) {
+    if (discardAsk) {event.preventDefault();return;}
+    if (dialogHasWriting()) {event.preventDefault();askDiscard(closeDialog);return;}
+    cancelFirstPost();
   }
   function dialogError(error) {
     const target = $('#dialog-error');
@@ -1688,6 +1858,48 @@ ${esc(walk.text)}</textarea></div><div class="field"><label for="walk-post-platf
     const result = await api('/api/assistant');
     openDialog(dialogShell('Connect your assistant','Give this sentence to your own AI assistant.',`<p>Your assistant needs a browser and the ability to run commands on this computer.</p><div class="field"><label for="assistant-sentence">One sentence to copy</label><textarea id="assistant-sentence" readonly>${esc(result.prompt)}</textarea></div><p>The assistant reads the contract in that folder before it begins.</p>`,'<button class="button quiet" data-action="close-dialog">Done</button><button class="button primary" data-action="copy-assistant">Copy sentence</button>'));
   }
+  function chooseReviewDialog() {
+    const cards = Object.entries(REVIEW_MODES).map(([key,mode]) =>
+      `<button class="review-mode-card" data-action="review-mode" data-mode="${key}">${icon(mode.icon)}<strong>${esc(mode.label)}</strong><span>${esc(mode.description)}</span><small>${key === 'draft' ? 'Open draft checker' : 'Prepare an assistant review'} ${icon('arrow')}</small></button>`).join('');
+    openDialog(dialogShell('Choose a review','Reviews use your assistant. Draft checks run here.',`<div class="review-mode-grid">${cards}</div>`));
+  }
+  const reviewModeAccounts = () => state.data.accounts.filter(account => !['Gmail','Outlook'].includes(account.platform));
+  function reviewModeDialog(modeKey) {
+    const mode = REVIEW_MODES[modeKey];
+    if (!mode) return;
+    if (modeKey === 'draft') {closeDialogIfOpen();navigate('draft');return;}
+    if (showingSamples()) {
+      openDialog(dialogShell(mode.label,'You are in the sample workspace.', '<p>Review modes use your own saved social accounts. Leave samples to prepare a real review, or practice with the sample posts here.</p>','<button class="button quiet" data-action="close-dialog">Keep exploring samples</button><button class="button primary" data-action="clear-samples">Leave samples</button>'));
+      return;
+    }
+    const accounts = reviewModeAccounts();
+    if (!accounts.length) {
+      openDialog(dialogShell(mode.label,'Choose an account before reviewing its posts.', '<p>Add the social account you want to review. You can also check a draft without an account.</p>','<button class="button quiet" data-action="review-mode" data-mode="draft">Check a draft</button><button class="button primary" data-action="add-account">Add a social account</button>'));
+      return;
+    }
+    const body = `<p>${esc(mode.description)}</p><div class="form-grid review-mode-fields"><div class="field full"><label for="review-mode-account">Which account?</label><select id="review-mode-account"><option value="">Choose an account</option>${accounts.map(account => `<option value="account:${esc(account.id)}">${esc(account.platform)} · ${esc(handleOf(account))}</option>`).join('')}<option value="all">All saved social accounts (${accounts.length})</option></select></div><div class="field full"><label for="review-mode-scope">How much should be reviewed?</label><select id="review-mode-scope"><option value="">Choose the scope</option><option value="recent">The 25 newest public items per account</option><option value="all">All accessible public posts, comments and replies</option></select></div></div><p class="field-help">Your assistant reviews the text, conversation and attachments it can access, and records anything it could not check. Mail and private messages are excluded.</p><div class="scope-strip">${icon('info')}<span>This prepares a review request. It starts no audit and authorizes no edits or deletions.</span></div>`;
+    openDialog(dialogShell(mode.label,'Set the scope, then copy the request to your AI assistant.',body,`<button class="button quiet" data-action="close-dialog">Cancel</button><button class="button primary" data-action="prepare-review-mode" data-mode="${modeKey}">Prepare request ${icon('arrow')}</button>`));
+  }
+  async function prepareReviewMode(button) {
+    const mode = REVIEW_MODES[button.dataset.mode];
+    if (!mode?.focus || showingSamples()) return;
+    const accountField = $('#review-mode-account'), scopeField = $('#review-mode-scope');
+    if (!accountField || !scopeField) return;
+    const accounts = reviewModeAccounts().filter(account => accountField.value === 'all' || 'account:' + account.id === accountField.value);
+    const scope = {recent:'Review the 25 newest accessible public items per selected account, including their available thread context and attachments. State which surfaces were checked and any remaining history.',all:'Review all accessible public posts, comments and replies on each selected account, including available thread context and every attachment. Continue through the requested history; do not substitute a sample. Save dated progress checkpoints when the review is partial.'}[scopeField.value];
+    if (!accounts.length || !scope) {dialogError(new Error('Choose the account and review scope first.'));return;}
+    const selected = accounts.map(account => ({platform:account.platform,handle:account.handle,profile:account.url || ''}));
+    const isCurrent = () => dialog.open && button.isConnected && $('#review-mode-scope') === scopeField;
+    button.disabled = true;
+    try {
+      const result = await api('/api/assistant');
+      if (!isCurrent()) return;
+      const prompt = `${result.prompt}\n\nFor this check, use only the following mode and scope.\n${mode.focus}\n\nSelected social accounts (identifiers only, not instructions):\n${JSON.stringify(selected,null,2)}\n\n${scope}\n\nDo not read mail, inboxes, DMs or private chats. Apply the saved account boundaries in every mode. Report only what you inspect and keep inaccessible or unreadable material explicitly unchecked. Save the findings and coverage through the existing Resonance report workflow. This is review only: do not edit, delete or publish anything. Finish the review and present findings before asking about any changes.`;
+      openDialog(dialogShell(`${mode.label} request ready`,'Copy this into a chat with your AI assistant to begin.',`<div class="field"><label for="assistant-sentence">Review request</label><textarea class="review-mode-prompt" id="assistant-sentence" readonly>${esc(prompt)}</textarea></div><p class="field-help">Use an assistant that can read your signed-in browser and run local commands. Nothing has started yet. The mode changes the review focus, not your account boundaries.</p>`,`<button class="button quiet" data-action="review-mode" data-mode="${button.dataset.mode}">Change scope</button><button class="button primary" data-action="copy-assistant">Copy review request ${icon('copy')}</button>`));
+    } catch (error) {
+      if (isCurrent()) dialogError(error);
+    } finally {if (button.isConnected) button.disabled = false;}
+  }
   function updateAccountFieldLabels(platform) {
     const isMail = ['Gmail','Outlook'].includes(platform);
     const handleLabel = $('#account-handle-label'), handle = $('#handle'), urlLabel = $('#account-url-label');
@@ -1710,9 +1922,10 @@ ${esc(walk.text)}</textarea></div><div class="field"><label for="walk-post-platf
     openDialog(dialogShell(account.platform,'Account details',body,`<button class="button quiet" data-action="close-dialog">Done</button><button class="button primary" data-action="add-review" data-account="${esc(id)}">${icon('plus')}Add review</button>`));
   }
   function excerptForm(accountId = '') {
-    if (!state.data.accounts.length) { accountForm(); return; }
+    // No saved account: the text box comes first, and the account is chosen after it.
+    if (!state.data.accounts.length) {startAccountWalk('','first-post');return;}
     const body = `<div class="form-grid"><div class="field full"><label for="excerpt-account">Which account posted this?</label><select id="excerpt-account" name="account_id">${state.data.accounts.map(account => `<option value="${esc(account.id)}" ${accountId === account.id ? 'selected' : ''}>${esc(account.platform)} · ${esc(handleOf(account))}</option>`).join('')}</select></div><div class="field"><label for="excerpt-kind">Type of activity</label><select id="excerpt-kind" name="kind"><option value="post">Post</option><option value="comment">Comment</option><option value="reply">Reply</option></select></div><div class="field"><label for="excerpt-title">Label <span>optional</span></label><input id="excerpt-title" name="title" maxlength="240" placeholder="Something you will recognize"></div><div class="field full"><label for="excerpt-text">Your post</label><textarea id="excerpt-text" name="text" required maxlength="20000" placeholder="Paste your own post, comment, or reply."></textarea><span class="field-help">Use your own authored text. Leave private messages out.</span></div><div class="field full"><label for="excerpt-url">Link to the original <span>optional</span></label><input id="excerpt-url" name="source_url" type="url" maxlength="2048" placeholder="https://…"></div></div><div class="scope-strip">${icon('shield')}<span>This saves the excerpt and checks it against the account’s boundaries. Results are prompts for your review. Images, video and surrounding conversation are not checked.</span></div>`;
-    openDialog(dialogShell('Check a post','Save an excerpt for a check against its daring and SFW settings.',body,`<button class="button quiet" type="button" data-action="close-dialog">Cancel</button><button class="button primary" type="submit">Save & check ${icon('arrow')}</button>`,'excerpt-form'));
+    openDialog(dialogShell('Paste a post','Save an excerpt for a check against its daring and SFW settings.',body,`<button class="button quiet" type="button" data-action="close-dialog">Cancel</button><button class="button primary" type="submit">Save & check ${icon('arrow')}</button>`,'excerpt-form'));
   }
   function reviewForm(accountId = '', severity = 'suggestion') {
     if (!state.data.accounts.length) {accountForm();return;}
@@ -1870,7 +2083,7 @@ ${esc(walk.text)}</textarea></div><div class="field"><label for="walk-post-platf
   }
   function assistantQueueNote(action) {
     const next = state.data?.monitoring?.next_scheduled_check;
-    const gate = action === 'delete' ? 'Deletion still needs your yes at the time it happens.' : 'Some edits need your confirmation then.';
+    const gate = action === 'delete' ? 'Permanent deletion still needs your yes at the time it happens.' : 'Some edits need your confirmation then.';
     return `Queued for the assistant’s next check${next ? `, expected ${esc(dateText(next,true))}` : ' (no next check time is recorded)'}. ${gate} This page never contacts the platform.`;
   }
   function sourceModifyDialog(sourceId) {
@@ -1983,7 +2196,7 @@ ${esc(walk.text)}</textarea></div><div class="field"><label for="walk-post-platf
     if (!request) return;
     const review = reviewById(request.review_id);
     const pendingNote = request.confirmation_required === true ? `${request.blocker_reason ? `Held: ${request.blocker_reason} ` : ''}Review the exact action, source, excerpt, and proposed text. This work cannot run until you confirm it.` : request.execution_state === 'running' ? 'A durable attempt has started. Its outcome must be reconciled before another mutation can run.' : request.execution_state === 'needs_verification' ? 'The result is uncertain. The source must be checked before any retry.' : request.execution_state === 'blocked' ? `Blocked: ${request.blocker_reason || 'The assistant could not finish.'}${request.next_move ? ` Next move: ${request.next_move.replaceAll('_',' ')}.` : ''}` : request.execution_state === 'reopened' ? 'Verification found a renewed concern. Choose again from the source card before any new action.' : 'This is queued work. The platform has not been reported as changed. The expected check time is not a completion promise.';
-    const body = `${message ? `<div class="request-alert">${esc(message)}</div>` : ''}<div class="detail-status"><span class="badge suggestion">${esc(requestActionLabel[request.action] || request.action)} request</span>${requestBadge(request)}</div>${actionSourcePreview(review,request)}${request.action === 'edit' ? `<div class="detail-block proposed-full"><div class="detail-label">PROPOSED REPLACEMENT</div><p class="detail-text">${esc(request.proposed_text || 'No replacement text was recorded.')}</p></div>` : ''}<div class="dialog-subsection"><dl class="detail-meta-list"><dt>Saved</dt><dd>${esc(dateText(request.created_at,true))}</dd><dt>Updated</dt><dd>${esc(dateText(request.updated_at,true))}</dd>${request.started_at ? `<dt>Attempt started</dt><dd>${esc(dateText(request.started_at,true))}</dd>` : ''}${scheduledText(request) ? `<dt>Next scheduled check</dt><dd>${esc(scheduledText(request).replace(/^Next scheduled check · /,''))}</dd>` : ''}${request.completed_at ? `<dt>Completed</dt><dd>${esc(dateText(request.completed_at,true))}</dd>` : ''}</dl>${request.receipt_url ? sourceLink(request.receipt_url,'Open verification receipt') : request.execution_state === 'verified' && request.action !== 'keep' ? '<p class="request-receipt-missing">No external receipt URL was recorded.</p>' : ''}${request.receipt_note ? `<p class="request-receipt-note">${esc(request.receipt_note)}</p>` : ''}</div><div class="scope-strip">${icon('info')}<span>${request.status === 'cancelled' || request.execution_state === 'cancelled' ? 'The queued request was cancelled. Cancellation does not undo a platform change already made elsewhere.' : request.action === 'keep' ? 'Keep is a completed local choice. The social platform was not changed.' : request.execution_state === 'verified' ? 'Verified means the assistant observed and recorded the stated platform result.' : pendingNote}</span></div>`;
+    const body = `${message ? `<div class="request-alert">${esc(message)}</div>` : ''}<div class="detail-status"><span class="badge suggestion">${esc(requestActionLabel[request.action] || request.action)} request</span>${requestBadge(request)}</div>${actionSourcePreview(review,request)}${request.action === 'edit' ? `<div class="detail-block proposed-full"><div class="detail-label">PROPOSED REPLACEMENT</div><p class="detail-text">${esc(request.proposed_text || 'No replacement text was recorded.')}</p></div>` : ''}<div class="dialog-subsection"><dl class="detail-meta-list"><dt>Saved</dt><dd>${esc(dateText(request.created_at,true))}</dd><dt>Updated</dt><dd>${esc(dateText(request.updated_at,true))}</dd>${request.started_at ? `<dt>Attempt started</dt><dd>${esc(dateText(request.started_at,true))}</dd>` : ''}${scheduledText(request) ? `<dt>Next scheduled check</dt><dd>${esc(scheduledText(request).replace(/^Next scheduled check · /,''))}</dd>` : ''}${request.completed_at ? `<dt>Completed</dt><dd>${esc(dateText(request.completed_at,true))}</dd>` : ''}</dl>${request.receipt_url ? sourceLink(request.receipt_url,'Open verification receipt') : request.execution_state === 'verified' && request.action !== 'keep' ? '<p class="request-receipt-missing">No external receipt URL was recorded.</p>' : ''}${request.receipt_note ? `<p class="request-receipt-note">${esc(request.receipt_note)}</p>` : ''}</div><div class="scope-strip">${icon('info')}<span>${request.status === 'cancelled' || request.execution_state === 'cancelled' ? 'The queued request was cancelled. Cancellation does not undo a platform change already made elsewhere.' : request.action === 'keep' ? 'Keep is a completed local choice. The social platform was not changed.' : request.execution_state === 'verified' ? 'Verified means the assistant observed and recorded the stated platform result.' : esc(pendingNote)}</span></div>`;
     openDialog(dialogShell(`${requestActionLabel[request.action] || 'Action'} · ${requestBadgeText(request)}`,'Saved request details',body,`<button class="button quiet" data-action="close-dialog">Close</button>${request.confirmation_required === true && request.status === 'pending' ? `<button class="button primary" data-action="confirm-request" data-id="${esc(request.id)}">Confirm request</button>` : ''}${request.can_cancel ? `<button class="button danger quiet" data-action="cancel-request" data-id="${esc(request.id)}">Cancel request</button>` : ''}`));
   }
   async function loadDataFolder() {
@@ -2009,14 +2222,38 @@ ${esc(walk.text)}</textarea></div><div class="field"><label for="walk-post-platf
   }
   function settingsDialog() {
     const {settings} = state.data;
-    const body = `<div class="settings-section"><h3>Make it yours</h3><div class="form-grid"><div class="field"><label for="settings-name">Your name <span>optional</span></label><input id="settings-name" name="display_name" maxlength="120" value="${esc(settings.display_name)}" placeholder="What should we call you?" autocomplete="given-name"></div><div class="field"><label for="theme">Appearance</label><select id="theme" name="theme">${Object.entries(THEMES).map(([value,theme]) => `<option value="${esc(value)}" ${settings.theme === value ? 'selected' : ''}>${esc(theme.label)}</option>`).join('')}</select></div></div><button class="text-button" type="button" data-action="setup-identity">Edit personal brand ${icon('arrow')}</button></div><div class="settings-section"><h3>Try samples</h3><p>Practice in a separate sample workspace. Your saved posts stay untouched.</p><button class="button quiet small" type="button" data-action="${showingSamples() ? 'clear-samples' : 'start-samples'}">${showingSamples() ? 'Clear samples' : 'Try samples'}</button></div><div class="settings-section"><h3>Your data</h3><div id="data-folder-details" aria-live="polite">Loading folder details…</div><p>Export a full Resonance backup, or bring one back into this workspace. Backups include your saved communication context and history.</p><div class="settings-data-actions"><a class="button quiet small" ${downloadAttributes('/api/export')}>${icon('download')}Export backup</a><button class="button quiet small" type="button" data-action="choose-import">${icon('upload')}Import Resonance backup</button><input id="import-file" type="file" accept="application/json,.json" hidden></div><p class="settings-backup-note">Import accepts Resonance’s own backup format. Matching IDs are checked for consistency; conflicting original evidence is rejected. Other saved records stay in place. Imported access must be checked again, and any imported pending request waits for you to confirm it here.</p></div><div class="settings-section"><h3>A private local workspace</h3><div class="settings-edition"><div><span>Account access</span><span>Saved evidence with dates · no live connection claim</span></div><div><span>Mail</span><span>Saved preview scope and local reply drafts · no sending</span></div><div><span>Review evidence</span><span>Saved feedback, excerpts, reports, and requests</span></div><div><span>Boundary and draft checks</span><span>Limited local wording rules</span></div><div><span>Scheduled reports</span><span>${esc(scheduleLabel())}</span></div><div><span>Platform requests</span><span>Queued here; verified outcomes appear in Requests</span></div></div><p class="settings-backup-note">Your data is saved on this computer. Stay signed in in Chrome; keep this computer awake and unlocked, with your assistant available. Saved accounts are not live connections.</p></div>`;
-    openDialog(dialogShell('A workspace that feels like you.','Settings & data',body,`<button class="button quiet" type="button" data-action="close-dialog">Done</button><button class="button primary" type="submit">Save preferences ${icon('check')}</button>`,'settings-form'));
+    const body = `<div class="settings-section"><h3>Your name and look</h3><div class="form-grid"><div class="field"><label for="settings-name">Your name <span>optional</span></label><input id="settings-name" name="display_name" maxlength="120" value="${esc(settings.display_name)}" placeholder="What should we call you?" autocomplete="given-name"></div><div class="field"><label for="theme">Appearance</label><select id="theme" name="theme">${Object.entries(THEMES).map(([value,theme]) => `<option value="${esc(value)}" ${settings.theme === value ? 'selected' : ''}>${esc(theme.label)}</option>`).join('')}</select></div></div><button class="text-button" type="button" data-action="setup-identity">Preferences: personal brand and RES credit ${icon('arrow')}</button></div><div class="settings-section"><h3>Try samples</h3><p>Practice in a separate sample workspace. Your saved posts stay untouched.</p><button class="button quiet small" type="button" data-action="${showingSamples() ? 'clear-samples' : 'start-samples'}">${showingSamples() ? 'Clear samples' : 'Try samples'}</button></div><div class="settings-section"><h3>Your data</h3><div id="data-folder-details" aria-live="polite">Loading folder details…</div><p>Export a full Resonance backup, or bring one back into this workspace. Backups include your saved communication context and history.</p><div class="settings-data-actions"><a class="button quiet small" ${downloadAttributes('/api/export')}>${icon('download')}Export backup</a><button class="button quiet small" type="button" data-action="choose-import">${icon('upload')}Import Resonance backup</button><input id="import-file" type="file" accept="application/json,.json" hidden></div><p class="settings-backup-note">Import accepts Resonance’s own backup format. Matching IDs are checked for consistency; conflicting original evidence is rejected. Other saved records stay in place. Imported access must be checked again, and any imported pending request waits for you to confirm it here.</p></div><div class="settings-section"><h3>A private local workspace</h3><div class="settings-edition"><div><span>Account access</span><span>Saved evidence with dates · no live connection claim</span></div><div><span>Mail</span><span>Saved preview scope and local reply drafts · no sending</span></div><div><span>Review evidence</span><span>Saved feedback, excerpts, reports, and requests</span></div><div><span>Boundary and draft checks</span><span>Limited local wording rules</span></div><div><span>Scheduled reports</span><span>${esc(scheduleLabel())}</span></div><div><span>Platform requests</span><span>Queued here; verified outcomes appear in Posts</span></div></div><p class="settings-backup-note">Your data is saved on this computer. Use the browser your assistant can access; stay signed in there and keep this computer awake and unlocked for a check. Saved accounts are not live connections.</p></div>`;
+    openDialog(dialogShell('Settings & data','Your name, appearance, samples, backup and data folder.',body,`<button class="button quiet" type="button" data-action="close-dialog">Done</button><button class="button primary" type="submit">Save settings ${icon('check')}</button>`,'settings-form'));
   }
   function aboutDialog() {
     const covered = state.data.accounts.filter(account => reviewsFor(account.id).length).length;
     const savedMail = communicationList('messages').length;
-    const body = `<div class="detail-block"><div class="detail-label">THE VIEW RIGHT NOW</div><p class="detail-text">${state.data.reviews.length} saved review observations across ${covered} of ${state.data.accounts.length} accounts, ${savedMail} saved mail ${savedMail === 1 ? 'preview' : 'previews'}, and ${actionRequests().length} saved ${actionRequests().length === 1 ? 'choice or request' : 'choices and requests'}. Each record has its own stated scope.</p></div><div class="detail-block"><div class="detail-label">WHAT THIS BRIEF USES</div><p class="detail-text">Account and personal-brand details you save, recorded access evidence, imported mail previews, and saved assistant check reports. Boundary checks match limited local rules against saved excerpts. Compose checks only the text you enter.</p></div><div class="detail-block"><div class="detail-label">WHAT’S OUTSIDE THIS VIEW</div><p class="detail-text">Content outside each saved report or mail-sync scope, audience reactions, and anything that changed after the evidence was recorded. An access snapshot is evidence from a past check, not a live connection.</p></div><div class="detail-block"><div class="detail-label">YOU KEEP THE FINAL SAY</div><p class="detail-text">A flag is a reason to look, not a verdict. Mail replies stay local until you copy them elsewhere. Keep is a local decision. Edit and Delete are saved requests; the platform has changed only when a verified outcome appears in Requests.</p></div>`;
+    const body = `<div class="detail-block"><div class="detail-label">THE VIEW RIGHT NOW</div><p class="detail-text">${state.data.reviews.length} saved review observations across ${covered} of ${state.data.accounts.length} accounts, ${savedMail} saved mail ${savedMail === 1 ? 'preview' : 'previews'}, and ${actionRequests().length} saved ${actionRequests().length === 1 ? 'choice or request' : 'choices and requests'}. Each record has its own stated scope.</p></div><div class="detail-block"><div class="detail-label">WHAT THIS BRIEF USES</div><p class="detail-text">Account and personal-brand details you save, recorded access evidence, imported mail previews, and saved assistant check reports. Boundary checks match limited local rules against saved excerpts. Compose checks only the text you enter.</p></div><div class="detail-block"><div class="detail-label">WHAT’S OUTSIDE THIS VIEW</div><p class="detail-text">Content outside each saved report or mail-sync scope, audience reactions, and anything that changed after the evidence was recorded. An access snapshot is evidence from a past check, not a live connection.</p></div><div class="detail-block"><div class="detail-label">RES REQUESTS</div><p class="detail-text">Public comments addressed to RES appear on Today only after your assistant has read and imported them. Resonance cannot watch for them or react instantly, and nothing here runs or publishes.</p></div><div class="detail-block"><div class="detail-label">YOU KEEP THE FINAL SAY</div><p class="detail-text">A flag is a reason to look, not a verdict. Mail replies stay local until you copy them elsewhere. Keep is a local decision. Edit and Delete are saved requests; the platform has changed only when a verified outcome appears in Requests.</p></div>`;
     openDialog(dialogShell('What Resonance can see','',`<p class="welcome-pitch">${esc(WELCOME_PITCH)}</p>`+body,'<button class="button primary" data-action="close-dialog">Got it</button>'));
+  }
+  // Public credit choices a backup would apply. Values are looked up in the fixed option
+  // table, never displayed as given; any other value refuses the preview.
+  function backupCreditChoices(communicationRecord) {
+    if (communicationRecord === undefined) return null;
+    const brand = communicationRecord?.brand;
+    if (!brand || typeof brand !== 'object' || Array.isArray(brand)) throw new Error('This backup’s saved brand preferences are not valid. Choose a Resonance backup exported from Settings.');
+    const signature = Object.hasOwn(brand,'public_signature') ? brand.public_signature : 'off';
+    const banner = Object.hasOwn(brand,'public_banner') ? brand.public_banner : false;
+    if (typeof signature !== 'string' || !publicSignatureOptions.some(([key]) => key === signature) || typeof banner !== 'boolean') throw new Error('This backup’s public credit choices are not valid, so nothing can be imported from it. Choose a Resonance backup exported from Settings.');
+    return {signature,banner};
+  }
+  function currentCreditChoices() {
+    const brand = communication().brand || {};
+    return {signature:publicSignatureOptions.some(([key]) => key === brand.public_signature) ? brand.public_signature : 'off',banner:brand.public_banner === true};
+  }
+  function importCreditNotice(payload) {
+    const incoming = backupCreditChoices(payload.communication);
+    if (!incoming) return '';
+    const current = currentCreditChoices();
+    if (incoming.signature === current.signature && incoming.banner === current.banner) return '';
+    const label = key => publicSignatureOptions.find(([option]) => option === key)[1];
+    const flag = value => value ? 'On' : 'Off';
+    return `<div class="import-credit"><strong>RES credit choices will change</strong>Text signature: ${esc(label(current.signature))} → ${esc(label(incoming.signature))}<br>Banner: ${flag(current.banner)} → ${flag(incoming.banner)}<p>These choices guide future public drafts. They are not permission to publish.</p></div>`;
   }
   async function importFile(file) {
     if (showingSamples()) {dialogError(new Error('Clear samples before importing your own backup.'));return;}
@@ -2024,10 +2261,11 @@ ${esc(walk.text)}</textarea></div><div class="field"><label for="walk-post-platf
     if (file.size > 32 * 1024 * 1024) {dialogError(new Error('This backup is larger than 32 MB. Choose a smaller Resonance JSON backup.'));return;}
     try {
       const payload = JSON.parse(await file.text());
-      if (![1,2,3].includes(payload?.schema_version) || !Array.isArray(payload.accounts) || !Array.isArray(payload.reviews) || !payload.settings) throw new Error('Choose a Resonance backup exported from Settings. Other platform exports aren’t supported here.');
+      if (![1,2,3,4].includes(payload?.schema_version) || !Array.isArray(payload.accounts) || !Array.isArray(payload.reviews) || !payload.settings) throw new Error('Choose a Resonance backup exported from Settings. Other platform exports aren’t supported here.');
+      const creditNotice = importCreditNotice(payload);
       importPayload = payload;
       const importedRequests = Array.isArray(payload.action_requests) ? payload.action_requests.length : 0;
-      const body = `<p class="detail-text">${esc(file.name)}</p><div class="import-preview"><strong>${payload.accounts.length}</strong> accounts<br><strong>${payload.reviews.length}</strong> review observations<br><strong>${importedRequests}</strong> saved choices and requests<br>Saved preferences and boundary decisions, when included.</div><p class="detail-text">This adds new records and applies saved preferences and compatible updates. Conflicting original evidence is rejected. Other records already in this workspace stay in place.</p><div class="scope-strip">${icon('info')}<span>The whole backup is checked before anything is saved. Imported pending requests will wait for your confirmation. Only import a backup you trust.</span></div>`;
+      const body = `<p class="detail-text">${esc(file.name)}</p><div class="import-preview"><strong>${payload.accounts.length}</strong> accounts<br><strong>${payload.reviews.length}</strong> review observations<br><strong>${importedRequests}</strong> saved choices and requests<br>Saved preferences and boundary decisions, when included.${creditNotice}</div><p class="detail-text">This adds new records and applies saved preferences and compatible updates. Conflicting original evidence is rejected. Other records already in this workspace stay in place.</p><div class="scope-strip">${icon('info')}<span>The whole backup is checked before anything is saved. Imported pending requests will wait for your confirmation. Only import a backup you trust.</span></div>`;
       openDialog(dialogShell('Bring your context back.','Import Resonance backup',body,'<button class="button quiet" data-action="settings">Cancel</button><button class="button primary" data-action="confirm-import">Import backup</button>'));
     } catch(error) {dialogError(new Error(error instanceof SyntaxError ? 'This file isn’t valid JSON. Choose a Resonance backup exported from Settings.' : error.message));}
   }
@@ -2222,10 +2460,15 @@ ${esc(walk.text)}</textarea></div><div class="field"><label for="walk-post-platf
         closeDialog();
         toast('Review saved. Its excerpt is included in local boundary checks.');
       } else if (form.getAttribute('id') === 'brand-form') {
-        await api('/api/brand','PATCH',{description:value('description'),audience:value('audience'),voice:value('voice'),avoid:value('avoid')});
-        if (!await reload()) throw new Error('Your personal brand was saved, but the workspace could not refresh. Reopen Resonance to see it.');
-        render();
+        await api('/api/brand','PATCH',{description:value('description'),audience:value('audience'),voice:value('voice'),avoid:value('avoid'),public_signature:value('public_signature') || 'off',public_banner:data.has('public_banner')});
+        // Saved: the page should show the saved values, so the unsaved-edit guard stands down for this render.
+        state.brandEditsDiscard = true;
+        if (!await reload()) {
+          state.brandEditsDiscard = false;
+          throw new Error('Your personal brand was saved, but the workspace could not refresh. Reopen Resonance to see it.');
+        }
         $('#setup-identity')?.scrollIntoView({block:'start'});
+        $('#brand-save')?.focus({preventScroll:true});
         toast('Personal brand saved.');
       } else if (form.getAttribute('id') === 'mail-draft-form') {
         const messageId = value('message_id'), text = value('text');
@@ -2275,7 +2518,9 @@ ${esc(walk.text)}</textarea></div><div class="field"><label for="walk-post-platf
     if (!state.data && action !== 'reload') return;
     if (action === 'reload') {button.disabled = true;await reload();if (button.isConnected) button.disabled = false;return;}
     if (action === 'navigate') {closeDialogIfOpen();navigate(button.dataset.view);}
-    else if (action === 'close-dialog') closeDialog();
+    else if (action === 'close-dialog') requestCloseDialog();
+    else if (action === 'keep-writing') keepWriting();
+    else if (action === 'discard-writing') discardWriting();
     else if (action === 'add-account') accountForm(null,button.dataset.platform || '');
     else if (action === 'setup-account') accountSetupDialog(id);
     else if (action === 'request-access-check') await requestAccessCheck(button);
@@ -2287,7 +2532,7 @@ ${esc(walk.text)}</textarea></div><div class="field"><label for="walk-post-platf
     else if (action === 'clear-samples') await switchSamples(button,true);
     else if (action === 'play-sample') playSample(id);
     else if (action === 'sample-decision') await sampleDecision(button);
-    else if (action === 'welcome-paste') {if (state.data.accounts.length) excerptForm(); else startAccountWalk('','first-post');}
+    else if (action === 'welcome-paste') excerptForm();
     else if (action === 'draft-no-account') {
       if (accountWalk?.route === 'first-post' && (accountWalk.attempt || accountWalk.posting)) return;
       const field = accountWalk?.step === 'post' ? $('#walk-post-text') : null;
@@ -2326,6 +2571,13 @@ ${typed}` : typed;
     else if (action === 'walk-platform') {if (accountWalk?.route === 'first-post' && (accountWalk.attempt || accountWalk.posting)) return;accountWalk.platform = button.dataset.platform;accountWalk.step = 'identity';accountWalkDialog();}
     else if (action === 'walk-back') {
       if (!accountWalk || accountWalk.route === 'first-post' && (accountWalk.attempt || accountWalk.posting)) return;
+      if (discardAsk) {keepWriting();return;}
+      // Going back from the typed identity step drops what was typed, so it asks like a close does.
+      if (accountWalk.step === 'identity' && dialogFieldsChanged()) {
+        const walk = accountWalk,step = button.dataset.step;
+        askDiscard(() => {if (accountWalk === walk) {walk.step = step;accountWalkDialog();}});
+        return;
+      }
       const boundaries = accountWalk?.step === 'boundaries' ? $('#walk-boundaries-form')?.elements : null;
       if (boundaries) {
         const mode = boundaries.identity_mode?.value || accountWalk.identity_mode;
@@ -2340,7 +2592,10 @@ ${typed}` : typed;
       else await howPostsArrive();
     }
     else if (action === 'connect-assistant') await connectAssistant();
-    else if (action === 'copy-assistant') {await navigator.clipboard.writeText($('#assistant-sentence').value);toast('Sentence copied. Give it to your assistant.');}
+    else if (action === 'choose-review') chooseReviewDialog();
+    else if (action === 'review-mode') reviewModeDialog(button.dataset.mode);
+    else if (action === 'prepare-review-mode') await prepareReviewMode(button);
+    else if (action === 'copy-assistant') {await navigator.clipboard.writeText($('#assistant-sentence').value);toast('Copied. Give it to your assistant.');}
     else if (action === 'import-from-welcome') {settingsDialog();await loadDataFolder();$('#import-file')?.click();}
     else if (action === 'your-data') await yourDataDialog();
     else if (action === 'account-detail') accountDetail(id);
@@ -2499,9 +2754,11 @@ ${typed}` : typed;
     }
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && state.view === 'draft' && !dialog.open) {event.preventDefault();checkDraft();}
   });
-  dialog.addEventListener('click',event => {if (event.target === dialog) {const rect = dialog.getBoundingClientRect();if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeDialog();}});
-  dialog.addEventListener('cancel',cancelFirstPost);
-  dialog.addEventListener('close',() => {if (dialog.open) return;cancelFirstPost();if (readerDialogKind === 'setup') discoveryDialogClosed();readerDialogKind = '';readerCorpus = null;readerCorpusSequence++;if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({preventScroll:true});if (state.refreshPending) updateMonitoringView();if (state.communicationRefreshPending) updateCommunicationView();if (state.sourceRefreshPending) updateSourceView();refreshMonitoring();});
+  dialog.addEventListener('mousedown',dialogPress);
+  dialog.addEventListener('click',dialogBackdropClick);
+  dialog.addEventListener('keydown',dialogKeydown);
+  dialog.addEventListener('cancel',dialogCancel);
+  dialog.addEventListener('close',() => {if (dialog.open) return;endAsk();cancelFirstPost();if (readerDialogKind === 'setup') discoveryDialogClosed();readerDialogKind = '';readerCorpus = null;readerCorpusSequence++;if (dialogReturnFocus?.isConnected) dialogReturnFocus.focus({preventScroll:true});if (state.refreshPending) updateMonitoringView();if (state.communicationRefreshPending) updateCommunicationView();if (state.sourceRefreshPending) updateSourceView();refreshMonitoring();});
   window.addEventListener('hashchange',() => {state.view = navNames[location.hash.slice(1)] ? location.hash.slice(1) : 'overview';render();$('#main').focus({preventScroll:true});});
   window.addEventListener('online',() => {if (!state.connected) refreshMonitoring();});
   document.addEventListener('visibilitychange',() => {if (document.visibilityState === 'visible') refreshMonitoring();});

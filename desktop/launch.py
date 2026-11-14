@@ -10,14 +10,19 @@ import errno
 import json
 import os
 from pathlib import Path
+import re
 import sys
+import tempfile
 import threading
 import webbrowser
 
 HOST, PORT = '127.0.0.1', 4317
 LOG_NAME = 'launcher.log'
 MAX_LOG_BYTES = 256 * 1024
-ADDRESS_IN_USE = {errno.EADDRINUSE, errno.EACCES, 10048, 10013}  # Windows socket codes included.
+ADDRESS_IN_USE = {errno.EADDRINUSE, 10048}
+ADDRESS_DENIED = {errno.EACCES, 10013}
+TRANSLOCATION_MESSAGE = ('Move Resonance.app to Applications, then open it from there. '
+                         'Resonance did not start or change your saved data.')
 
 
 def log_directory(platform=None, environ=None, home=None):
@@ -54,12 +59,17 @@ class Log:
 
 
 def plain_message(error, port, log_path):
-    """One calm sentence for the person; the technical detail stays in the log."""
+    """Explain a failed start without printing the exception's private text."""
     where = f'\n\nDetails are saved in:\n{log_path}'
-    if isinstance(error, OSError) and error.errno in ADDRESS_IN_USE:
+    codes = {error.errno, getattr(error, 'winerror', None)} if isinstance(error, OSError) else set()
+    if codes & ADDRESS_DENIED:
+        return (f'The operating system denied access to Resonance’s local port ({port}). '
+                'The port may be reserved or restricted. Your saved data was not changed.' + where)
+    if codes & ADDRESS_IN_USE:
         return (f'Resonance could not start because its local address ({HOST}:{port}) is already in use. '
-                'If Resonance is already open, use that window. Otherwise close the other program that is '
-                'using it and open Resonance again. Your saved data was not changed.' + where)
+                'Use the existing Resonance window if there is one. An older Resonance source launcher '
+                'can also leave a background copy running. Close the program using the port if you '
+                'recognize it, then open Resonance again. Your saved data was not changed.' + where)
     return ('Resonance could not start. Please close this message '
             'and open Resonance again.' + where)
 
@@ -89,14 +99,16 @@ class Controller:
             self.server = make_server(self.data_dir, self.port)
             # Port 0 is for tests; the server reports the port it was given.
             self.port = self.server.server_address[1]
+            self.thread = threading.Thread(target=self.server.serve_forever, name='resonance-server', daemon=True)
+            self.thread.start()
         except Exception as error:  # noqa: BLE001 - every failure becomes a plain message.
+            if self.server is not None:
+                self.server.server_close()
             self.server = None
-            code = getattr(error, 'errno', None)
+            code = getattr(error, 'winerror', None) or getattr(error, 'errno', None)
             self.log.write('start-failed', type(error).__name__ + (f' errno={code}' if code else ''))
             self.error_message = plain_message(error, self.port, self.log.path)
             return False
-        self.thread = threading.Thread(target=self.server.serve_forever, name='resonance-server', daemon=True)
-        self.thread.start()
         self.log.write('started', self.url)
         return True
 
@@ -116,8 +128,10 @@ class Controller:
             return
         self.stopped = True
         try:
-            self.server.shutdown()
-            self.server.server_close()
+            try:
+                self.server.shutdown()
+            finally:
+                self.server.server_close()
             if self.thread is not None:
                 self.thread.join(timeout=5)
         finally:
@@ -188,49 +202,152 @@ def keep_streams_usable():
             setattr(sys, name, open(os.devnull, 'w', encoding='utf-8'))
 
 
+def is_translocated(executable=None, platform=None, frozen=None):
+    if platform is None:
+        platform = sys.platform
+    if frozen is None:
+        frozen = getattr(sys, 'frozen', False)
+    return (platform == 'darwin' and bool(frozen) and
+            'AppTranslocation' in Path(sys.executable if executable is None else executable).parts)
+
+
+def show_move_instruction():
+    # A Finder launch may have no visible stderr. Show the move instruction without loading Tk.
+    import ctypes
+
+    cf = ctypes.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+    create = cf.CFStringCreateWithCString
+    create.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
+    create.restype = ctypes.c_void_p
+    release = cf.CFRelease
+    release.argtypes = [ctypes.c_void_p]
+    release.restype = None
+    alert = cf.CFUserNotificationDisplayAlert
+    alert.argtypes = [ctypes.c_double, ctypes.c_ulong] + [ctypes.c_void_p] * 9
+    alert.restype = ctypes.c_int32
+    title = create(None, b'Resonance', 0x08000100)  # kCFStringEncodingUTF8
+    message = create(None, TRANSLOCATION_MESSAGE.encode('utf-8'), 0x08000100)
+    try:
+        alert(0, 0, None, None, None, title, message, None, None, None, None)
+    finally:
+        for value in (message, title):
+            if value:
+                release(value)
+
+
 def self_test(data_dir, port, log):
-    """Headless check of a packaged build: serve once from a synthetic folder, request the page."""
+    """Check headless Tcl, the page and the assistant prompt with disposable data."""
+    try:
+        import tkinter
+
+        tcl_patch = tkinter.Tcl().call('info', 'patchlevel')
+    except Exception:  # Toolkit import and native initialization can fail in several ways.
+        return {'ok': False, 'problem': 'tcl'}
+    if not isinstance(tcl_patch, str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', tcl_patch):
+        return {'ok': False, 'problem': 'tcl'}
+
     from urllib.request import ProxyHandler, build_opener
     from zoneinfo import ZoneInfo
+    import assistant_kit
     import server
 
-    class Silent:
-        def show_error(self, message):
-            pass
+    frozen = bool(getattr(sys, 'frozen', False))
+    with tempfile.TemporaryDirectory(prefix='resonance-assistant-smoke-') as temporary:
+        destination = Path(temporary).resolve() / 'kit'
+        try:
+            kit = assistant_kit.ensure(server.ROOT, destination=destination, data_directory=data_dir)
+        except assistant_kit.KitError:
+            return {'ok': False, 'problem': 'assistant-kit'}
 
-    controller = Controller(Silent(), log, data_dir=data_dir, port=port)
-    if not controller.start():
-        return {'ok': False, 'problem': 'start'}
+        def make_server(directory, address_port):
+            app = server.make_server(directory, address_port)
+            app.assistant_kit_destination = destination
+            return app
+
+        controller = Controller(None, log, data_dir=data_dir, port=port, make_server=make_server)
+        if not controller.start():
+            return {'ok': False, 'problem': 'start'}
+        try:
+            client = build_opener(ProxyHandler({}))
+            with client.open(controller.url + '/', timeout=5) as response:
+                page = response.status == 200 and b'<html' in response.read(4096).lower()
+            with client.open(controller.url + '/api/assistant', timeout=5) as response:
+                assistant = json.load(response) == {
+                    'prompt': f'Read ASSISTANT.md in {kit} and run my Resonance check.'}
+            ZoneInfo('America/New_York')
+            return {'ok': bool(page and assistant), 'assistant_kit': assistant,
+                    'version': (server.ROOT / 'VERSION').read_text(encoding='utf-8').strip(),
+                    'seed': (server.ROOT / 'examples' / 'practice.seed.json').is_file(),
+                    'frozen': frozen, 'tcl': True, 'tcl_patch': tcl_patch}
+        except (OSError, ValueError, KeyError):
+            return {'ok': False, 'problem': 'check'}
+        finally:
+            controller.shutdown()
+
+
+def write_report(path, result):
+    """Publish a complete JSON report even if the executable has no stdout."""
+    temporary = None
     try:
-        with build_opener(ProxyHandler({})).open(controller.url + '/', timeout=5) as response:
-            page = response.status == 200 and b'<html' in response.read(4096).lower()
-        ZoneInfo('America/New_York')
-        return {'ok': bool(page), 'version': (server.ROOT / 'VERSION').read_text(encoding='utf-8').strip(),
-                'seed': (server.ROOT / 'examples' / 'practice.seed.json').is_file(),
-                'frozen': bool(getattr(sys, 'frozen', False))}
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as file:
+            temporary = Path(file.name)
+            json.dump(result, file)
+            file.write('\n')
+        os.replace(temporary, path)
     finally:
-        controller.shutdown()
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--self-test', action='store_true',
-                        help='Start once without a window or browser, check the page, and exit')
-    parser.add_argument('--data-dir', type=Path, help='Only for --self-test: a synthetic data folder')
-    parser.add_argument('--port', type=int, default=PORT, help=argparse.SUPPRESS)
-    # Finder may pass a process-serial argument on older macOS releases; it means nothing here.
-    argv = [item for item in (sys.argv[1:] if argv is None else argv) if not item.startswith('-psn_')]
-    args = parser.parse_args(argv)
     keep_streams_usable()
-    log = Log(log_directory() / LOG_NAME)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument('--self-test', action='store_true',
+                        help='Check Tcl and the page once without a window or browser, and exit')
+    parser.add_argument('--data-dir', type=Path, help='Only for --self-test: a synthetic data folder')
+    parser.add_argument('--port', type=int, help=argparse.SUPPRESS)
+    parser.add_argument('--log-dir', type=Path, help='Only for --self-test: a synthetic log folder')
+    parser.add_argument('--self-test-report', type=Path, help='Only for --self-test: save the JSON result here')
+    # Finder and Windows can supply launch arguments that have no meaning here.
+    args, _ = parser.parse_known_args(argv)
+    if not args.self_test and any(value is not None for value in
+                                 (args.data_dir, args.port, args.log_dir, args.self_test_report)):
+        parser.error('--data-dir, --port, --log-dir and --self-test-report are only for --self-test.')
     if args.self_test:
         if args.data_dir is None:
             parser.error('--self-test needs --data-dir with a temporary synthetic folder.')
-        result = self_test(args.data_dir, args.port, log)
+        if args.port is not None and not 0 <= args.port <= 65535:
+            parser.error('--port must be between 0 and 65535.')
+    if is_translocated():
+        print(TRANSLOCATION_MESSAGE, file=sys.stderr)
+        if not args.self_test:
+            try:
+                show_move_instruction()
+            except (OSError, AttributeError):
+                pass  # stderr still carries the instruction for a terminal launch.
+        return 1
+    if args.self_test:
+        import server
+
+        try:
+            data_dir = server.safe_data_directory(args.data_dir)
+            log_dir = server.safe_data_directory(args.log_dir) if args.log_dir is not None else data_dir
+            report = (server.safe_data_directory(args.self_test_report.parent) / args.self_test_report.name
+                      if args.self_test_report is not None else None)
+        except (server.Invalid, OSError, RuntimeError):
+            print('Choose local synthetic folders for the Resonance self-test.', file=sys.stderr)
+            return 1
+        log = Log(log_dir / LOG_NAME)
+        result = self_test(data_dir, PORT if args.port is None else args.port, log)
+        if report is not None:
+            try:
+                write_report(report, result)
+            except OSError:
+                print('Resonance could not save its self-test report.', file=sys.stderr)
+                return 1
         print(json.dumps(result))
         return 0 if result['ok'] else 1
-    if args.data_dir is not None or args.port != PORT:
-        parser.error('--data-dir and --port are only for --self-test.')
+    log = Log(log_directory() / LOG_NAME)
     try:
         return Controller(TkUi(), log).run()
     except Exception as error:  # noqa: BLE001 - no traceback for a normal user.

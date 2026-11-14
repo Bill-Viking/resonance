@@ -1,5 +1,8 @@
+from contextlib import closing
 import copy
 import json
+import pathlib
+import sqlite3
 import tempfile
 import unittest
 
@@ -44,7 +47,8 @@ class CommunicationTests(unittest.TestCase):
     def test_clean_state_brand_and_mailbox_platforms(self):
         communication = self.store.state()['communication']
         self.assertEqual(communication, {
-            'brand': {'description': '', 'audience': '', 'voice': '', 'avoid': '', 'updated_at': None},
+            'brand': {'description': '', 'audience': '', 'voice': '', 'avoid': '', 'updated_at': None,
+                      'public_signature': 'off', 'public_banner': False},
             'access': [], 'setup_requests': [], 'mail_syncs': [], 'messages': [], 'drafts': []})
         status, result = self.store.mutate('PATCH', '/api/brand', {
             'description': 'Clear and practical', 'audience': 'Engineering peers',
@@ -56,6 +60,247 @@ class CommunicationTests(unittest.TestCase):
             self.store.mutate('PATCH', '/api/brand', {'voice': 'x' * 4001})
         with self.assertRaises(server.Invalid):
             self.store.mutate('PATCH', '/api/brand', {'api_key': 'secret'})
+
+    LEGACY_BRAND = {'description': 'Grounded', 'audience': 'Peers', 'voice': 'Plain', 'avoid': 'Hype',
+                    'updated_at': '2026-09-15T13:00:00Z'}
+
+    def write_brand_row(self, record):
+        with self.store.connect() as db:
+            db.execute('UPDATE communication_brand SET data=? WHERE id=1', (json.dumps(record),))
+
+    def raw_brand_row(self):
+        with self.store.connect() as db:
+            return db.execute('SELECT data FROM communication_brand WHERE id=1').fetchone()[0]
+
+    def test_legacy_brand_row_reads_as_off_without_writing(self):
+        self.write_brand_row(self.LEGACY_BRAND)
+        before = self.raw_brand_row()
+        self.assertNotIn('public_signature', before)
+        brand = self.store.state()['communication']['brand']
+        self.assertEqual(brand, dict(self.LEGACY_BRAND, public_signature='off', public_banner=False))
+        self.assertEqual(server.Store(self.temp.name).state()['communication']['brand'], brand)
+        self.assertEqual(self.raw_brand_row(), before, 'reading and reopening never migrate the stored record')
+        # A backup of a legacy row carries the normalized values but still does not rewrite the row.
+        self.assertEqual(self.store.backup()['communication']['brand'], brand)
+        self.assertEqual(self.raw_brand_row(), before)
+
+    def test_new_workspace_defaults_are_off(self):
+        brand = json.loads(self.raw_brand_row())
+        self.assertEqual((brand['public_signature'], brand['public_banner']), ('off', False))
+        self.assertEqual(server.brand_defaults()['public_signature'], 'off')
+
+    def test_read_only_profile_normalizes_legacy_brand_without_changing_files(self):
+        self.write_brand_row(self.LEGACY_BRAND)
+        before = self.raw_brand_row()
+        directory = pathlib.Path(self.temp.name)
+
+        def files():
+            return {str(path.relative_to(directory)): (path.read_bytes(), path.stat().st_mtime_ns)
+                    for path in directory.rglob('*') if path.is_file()}
+        snapshot = files()
+        profile = server.Store(self.temp.name, read_only=True).profile_snapshot()
+        self.assertEqual(profile['brand'], dict(self.LEGACY_BRAND, public_signature='off', public_banner=False))
+        self.assertEqual(files(), snapshot, 'a read-only profile changes no file')
+        self.assertEqual(self.raw_brand_row(), before)
+        self.store.mutate('PATCH', '/api/brand', {'public_signature': 'compact', 'public_banner': True})
+        profile = server.Store(self.temp.name, read_only=True).profile_snapshot()
+        self.assertEqual((profile['brand']['public_signature'], profile['brand']['public_banner']), ('compact', True))
+
+    def test_read_only_profile_refuses_malformed_public_choices(self):
+        for bad in ({'public_signature': 'loud'}, {'public_banner': 'yes'}, {'public_signature': None},
+                    {'public_banner': None}, {'public_banner': 1}, {'unknown': True}):
+            with self.subTest(bad=bad):
+                self.write_brand_row(dict(self.LEGACY_BRAND, **bad))
+                with self.assertRaises(server.Invalid):
+                    server.Store(self.temp.name, read_only=True).profile_snapshot()
+
+    def test_public_choices_persist_and_partial_updates_keep_them(self):
+        status, result = self.store.mutate('PATCH', '/api/brand', {'public_signature': 'full', 'public_banner': True})
+        self.assertEqual(status, 200)
+        self.assertEqual((result['brand']['public_signature'], result['brand']['public_banner']), ('full', True))
+        for body in ({'voice': 'Changed voice'}, {'description': 'Changed'}, {}):
+            self.store.mutate('PATCH', '/api/brand', body)
+            brand = server.Store(self.temp.name).state()['communication']['brand']
+            self.assertEqual((brand['public_signature'], brand['public_banner']), ('full', True), body)
+        self.assertEqual(self.store.state()['communication']['brand']['voice'], 'Changed voice')
+        # Each choice can change alone, and turning one off does not disturb the other.
+        self.store.mutate('PATCH', '/api/brand', {'public_banner': False})
+        brand = self.store.state()['communication']['brand']
+        self.assertEqual((brand['public_signature'], brand['public_banner']), ('full', False))
+        self.store.mutate('PATCH', '/api/brand', {'public_signature': 'compact'})
+        brand = self.store.state()['communication']['brand']
+        self.assertEqual((brand['public_signature'], brand['public_banner']), ('compact', False))
+        self.store.mutate('PATCH', '/api/brand', {'public_signature': 'off'})
+        self.assertEqual(self.store.state()['communication']['brand']['public_signature'], 'off')
+
+    def test_partial_update_of_text_keeps_existing_text_and_legacy_row_gains_defaults(self):
+        self.write_brand_row(self.LEGACY_BRAND)
+        status, result = self.store.mutate('PATCH', '/api/brand', {'public_banner': True})
+        self.assertEqual(status, 200)
+        brand = server.Store(self.temp.name).state()['communication']['brand']
+        for key in ('description', 'audience', 'voice', 'avoid'):
+            self.assertEqual(brand[key], self.LEGACY_BRAND[key])
+        self.assertEqual((brand['public_signature'], brand['public_banner']), ('off', True))
+        self.assertEqual(result['brand'], brand)
+
+    def test_invalid_public_choices_are_refused_atomically(self):
+        self.store.mutate('PATCH', '/api/brand', {'voice': 'Kept', 'public_signature': 'compact', 'public_banner': True})
+        before_row = self.raw_brand_row()
+        before_activity = self.store.state()['activity']
+        invalid = ({'public_signature': 'loud'}, {'public_signature': 'Compact'}, {'public_signature': ''},
+                   {'public_signature': None}, {'public_signature': True}, {'public_signature': ['off']},
+                   {'public_banner': None}, {'public_banner': 'true'}, {'public_banner': 1}, {'public_banner': 0},
+                   {'public_banner': 'on'}, {'public_banner': []},
+                   {'public_signature': 'off', 'public_banner': 'false'},
+                   {'voice': 'Would be changed', 'public_signature': 'loud'},
+                   {'voice': 'Would be changed', 'public_banner': None},
+                   {'voice': 'Would be changed', 'public_signature': 'off', 'unknown_key': 'x'},
+                   {'public_credit': 'full'}, {'updated_at': '2026-01-01T00:00:00Z', 'public_banner': False})
+        for body in invalid:
+            with self.subTest(body=body):
+                with self.assertRaises(server.Invalid):
+                    self.store.mutate('PATCH', '/api/brand', body)
+                self.assertEqual(self.raw_brand_row(), before_row, 'a refused update changes nothing')
+        brand = self.store.state()['communication']['brand']
+        self.assertEqual((brand['voice'], brand['public_signature'], brand['public_banner']), ('Kept', 'compact', True))
+        self.assertEqual(self.store.state()['activity'], before_activity)
+
+    def test_backup_carries_public_choices_and_restores_them(self):
+        self.store.mutate('PATCH', '/api/brand', {'voice': 'Plain', 'public_signature': 'full', 'public_banner': True})
+        backup = self.store.backup()
+        self.assertEqual((backup['communication']['brand']['public_signature'],
+                          backup['communication']['brand']['public_banner']), ('full', True))
+        with tempfile.TemporaryDirectory() as location:
+            restored = server.Store(location)
+            restored.mutate('POST', '/api/import', copy.deepcopy(backup))
+            brand = restored.state()['communication']['brand']
+            self.assertEqual((brand['voice'], brand['public_signature'], brand['public_banner']), ('Plain', 'full', True))
+            self.assertEqual(server.Store(location).state()['communication']['brand'], brand)
+            self.assertEqual(restored.backup()['communication']['brand'], backup['communication']['brand'])
+
+    def test_old_backup_without_public_fields_restores_as_off_and_resets_old_choices(self):
+        self.store.mutate('PATCH', '/api/brand', {'public_signature': 'full', 'public_banner': True})
+        old = self.store.backup()
+        for key in ('public_signature', 'public_banner'):
+            del old['communication']['brand'][key]
+        old['communication']['brand'].update(voice='From an older backup')
+        with tempfile.TemporaryDirectory() as location:
+            restored = server.Store(location)
+            restored.mutate('POST', '/api/import', copy.deepcopy(old))
+            brand = restored.state()['communication']['brand']
+            self.assertEqual((brand['voice'], brand['public_signature'], brand['public_banner']),
+                             ('From an older backup', 'off', False))
+        # The old backup was applied to a workspace that had opted in: the backup's own record wins, as for every brand field.
+        self.store.mutate('POST', '/api/import', copy.deepcopy(old))
+        brand = self.store.state()['communication']['brand']
+        self.assertEqual((brand['voice'], brand['public_signature'], brand['public_banner']),
+                         ('From an older backup', 'off', False))
+
+    def dump(self, path):
+        with closing(sqlite3.connect(path)) as db:
+            return db.execute('PRAGMA user_version').fetchone()[0], tuple(db.iterdump())
+
+    def downgrade_to_schema_six(self, record):
+        """A synthetic schema 6 folder: the shape preview 8 wrote before the format barrier."""
+        self.write_brand_row(record)
+        with self.store.connect() as db:
+            db.execute('PRAGMA user_version=6')
+        self.assertEqual(len(server.MIGRATIONS), 7)
+        self.assertEqual(server.MIGRATIONS[-1].__name__, 'public_brand_contract')
+
+    def test_public_brand_contract_is_a_format_barrier_that_rewrites_nothing(self):
+        self.downgrade_to_schema_six(self.LEGACY_BRAND)
+        directory = pathlib.Path(self.temp.name)
+        before_row = self.raw_brand_row()
+        before = self.dump(self.store.path)
+        self.assertEqual(before[0], 6)
+        earlier = set((directory / 'backups' / 'auto').glob('*.sqlite3'))  # From creating the workspace.
+        upgraded = server.Store(self.temp.name)
+        after = self.dump(upgraded.path)
+        self.assertEqual(after[0], 7)
+        self.assertEqual(after[1], before[1], 'the barrier changes neither schema nor stored data')
+        self.assertEqual(self.raw_brand_row(), before_row, 'the stored legacy row is not rewritten')
+        saved = set((directory / 'backups' / 'auto').glob('*.sqlite3')) - earlier
+        self.assertEqual([path.name.split('-before-')[1] for path in saved], ['v7.sqlite3'], 'the normal pre-upgrade snapshot is kept')
+        self.assertEqual(self.dump(saved.pop()), before, 'the snapshot is the exact schema 6 database')
+        brand = upgraded.state()['communication']['brand']
+        self.assertEqual(brand, dict(self.LEGACY_BRAND, public_signature='off', public_banner=False))
+        self.assertEqual(self.raw_brand_row(), before_row, 'reading after the upgrade still writes nothing')
+        count = len(list((directory / 'backups' / 'auto').glob('*.sqlite3')))
+        server.Store(self.temp.name)
+        self.assertEqual(len(list((directory / 'backups' / 'auto').glob('*.sqlite3'))), count, 'reopening takes no new snapshot')
+
+    def test_read_only_profile_on_schema_six_refuses_without_writing(self):
+        self.downgrade_to_schema_six(self.LEGACY_BRAND)
+        directory = pathlib.Path(self.temp.name)
+
+        def files():
+            return {str(path.relative_to(directory)): (path.read_bytes(), path.stat().st_mtime_ns)
+                    for path in directory.rglob('*') if path.is_file()}
+        before = files()
+        with self.assertRaisesRegex(server.Invalid, 'matching app version'):
+            server.Store(self.temp.name, read_only=True).profile_snapshot()
+        self.assertEqual(files(), before, 'a refused read-only profile changes no file and takes no upgrade snapshot')
+
+    def test_older_edition_guard_refuses_the_next_format_before_parsing_any_brand(self):
+        # Preview 8 only compares user_version with its own migration count (6) and refuses
+        # anything higher with this message before it reads a brand row.
+        self.assertEqual(len(server.MIGRATIONS), 7)
+        self.store.mutate('PATCH', '/api/brand', {'public_signature': 'full', 'public_banner': True})
+        self.assertEqual(self.dump(self.store.path)[0], 7)
+        with self.store.connect() as db:
+            db.execute('PRAGMA user_version=8')
+        before = self.store.path.read_bytes()
+        with self.assertRaisesRegex(server.Invalid, 'needs a newer version of Resonance'):
+            server.Store(self.temp.name)
+        self.assertEqual(self.store.path.read_bytes(), before)
+
+    def test_backup_format_four_exports_and_formats_one_to_four_restore_explicit_choices(self):
+        self.store.mutate('PATCH', '/api/brand', {'voice': 'Plain', 'public_signature': 'full', 'public_banner': True})
+        exported = self.store.backup()
+        self.assertEqual(exported['schema_version'], 4)
+        self.assertEqual((exported['communication']['brand']['public_signature'],
+                          exported['communication']['brand']['public_banner']), ('full', True))
+        for version in (1, 2, 3, 4):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as location:
+                body = copy.deepcopy(exported)
+                body['schema_version'] = version
+                if version < 3:
+                    for key in ('reader_checks', 'reader_sources', 'reader_revisions'):
+                        body.pop(key)
+                restored = server.Store(location)
+                self.assertEqual(restored.mutate('POST', '/api/import', body)[0], 200)
+                brand = restored.state()['communication']['brand']
+                self.assertEqual((brand['voice'], brand['public_signature'], brand['public_banner']), ('Plain', 'full', True),
+                                 'an explicit choice in an older format is never silently lost')
+            with self.subTest(version=version, fields='absent'), tempfile.TemporaryDirectory() as location:
+                body = copy.deepcopy(exported)
+                body['schema_version'] = version
+                if version < 3:
+                    for key in ('reader_checks', 'reader_sources', 'reader_revisions'):
+                        body.pop(key)
+                for key in ('public_signature', 'public_banner'):
+                    del body['communication']['brand'][key]
+                restored = server.Store(location)
+                restored.mutate('POST', '/api/import', body)
+                brand = restored.state()['communication']['brand']
+                self.assertEqual((brand['public_signature'], brand['public_banner']), ('off', False))
+        for version in (0, 5, True, '4'):
+            with self.assertRaisesRegex(server.Invalid, 'Unsupported backup version'):
+                self.store.mutate('POST', '/api/import', dict(exported, schema_version=version))
+
+    def test_backup_import_refuses_invalid_public_choices_without_changing_anything(self):
+        self.store.mutate('PATCH', '/api/brand', {'voice': 'Kept', 'public_signature': 'compact', 'public_banner': True})
+        before_row = self.raw_brand_row()
+        backup = self.store.backup()
+        for bad in ({'public_signature': 'loud'}, {'public_signature': None}, {'public_banner': None},
+                    {'public_banner': 'false'}, {'public_banner': 0}, {'unknown_key': 1}):
+            with self.subTest(bad=bad):
+                changed = copy.deepcopy(backup)
+                changed['communication']['brand'].update(voice='Would replace', **bad)
+                with self.assertRaises(server.Invalid):
+                    self.store.mutate('POST', '/api/import', changed)
+                self.assertEqual(self.raw_brand_row(), before_row)
 
     def test_social_profiles_persist_without_implied_access(self):
         for platform, source in (

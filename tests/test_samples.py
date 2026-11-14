@@ -135,6 +135,18 @@ class SampleWorkspaceTests(unittest.TestCase):
         with self.assertRaisesRegex(samples.SampleError, 'Sample records'):
             self.call('POST', '/api/import', capture)
 
+    def test_sample_brand_row_keeps_the_five_key_shape_older_editions_read(self):
+        self.start()
+        with self.workspace._demo().connect() as db:
+            stored = json.loads(db.execute('SELECT data FROM communication_brand WHERE id=1').fetchone()[0])
+        self.assertEqual(set(stored), {'description', 'audience', 'voice', 'avoid', 'updated_at'})
+        brand = self.workspace.state()['communication']['brand']
+        self.assertEqual((brand['public_signature'], brand['public_banner']), ('off', False))
+        with self.assertRaises(samples.SampleError):
+            self.call('PATCH', '/api/brand', {'public_banner': True})
+        with self.workspace._demo().connect() as db:
+            self.assertEqual(json.loads(db.execute('SELECT data FROM communication_brand WHERE id=1').fetchone()[0]), stored)
+
     def test_rehearsal_requires_current_queued_sample_and_has_no_real_route(self):
         with self.assertRaises(samples.SampleError):
             self.call('POST', '/api/samples/rehearse', {'request_id': 'synthetic', 'decision': 'yes'})

@@ -8,10 +8,10 @@ scheduled checks, publish, edit, delete, send messages or switch accounts.
 
 To find a supported account, it reads the active X handle or YouTube handle and
 channel identifier. You decide whether to save that account in Resonance.
-To run a check, it reads at most three recent own X posts or YouTube comments,
+To run a check, it reads at most three recent own posts from the main X profile timeline (not replies to other people), or YouTube comments,
 their source links, available dates and authorship evidence. It reports what it
 could confirm and what it could not read. It does not read private messages,
-passwords, authentication cookies, browsing history, images or video content.
+passwords, authentication cookies, general browsing history, images or video content. It does read the Google activity page for your YouTube comment history. The current reader requires an English-language YouTube interface; other languages may prevent it from finding the account or comments.
 
 ## Where that information goes
 
@@ -23,7 +23,7 @@ There is no developer collection endpoint, analytics service, advertising use,
 sale of data or model service in either the extension or local application.
 
 Opening provider pages uses your browser's existing session and sends the normal
-page requests to X, YouTube or Google. Those services have their own policies.
+page requests to X, YouTube or Google. Opening YouTube comment videos may add them to your watch history or start playback before the reader pauses it. Those services have their own policies.
 The extension does not send your writing to an additional external service.
 An external assistant you choose to use is separate and uses its own permissions
 and data practices; Resonance does not automatically send it your records.
@@ -43,5 +43,5 @@ copies gone. Keep any backup you still need. The current edition has no
 per-source erasure control for the immutable reader history. Portable backups
 are readable JSON, not encrypted archives. No automatic remote backup is made.
 
-This policy describes reader version 0.1.0 and app candidate 0.1.0-preview.7.
+This policy describes reader version 0.1.0 and app candidate 0.1.0-rc.1.
 Reader-store publication is still pending.

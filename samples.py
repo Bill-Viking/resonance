@@ -271,6 +271,10 @@ class Workspace:
             with store.connect() as db:
                 store.initialize_schema(db)
                 db.execute(f'PRAGMA user_version = {len(self.api.MIGRATIONS)}')
+                # Keep the sample brand row in the five-key shape older editions parse. Reads still
+                # fill in the optional public credit choices as off/false.
+                legacy = {key: value for key, value in self.api.brand_defaults().items() if key not in self.api.BRAND_PUBLIC_FIELDS}
+                db.execute('UPDATE communication_brand SET data=? WHERE id=1', (self.api.canonical_json(legacy),))
             self._seed(store)
         return store
 

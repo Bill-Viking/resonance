@@ -27,7 +27,9 @@
   const YT_CHANNEL = /^UC[A-Za-z0-9_-]{22}$/;
   const TOKEN = /^[a-z_]{1,48}$/;
   const STAGES = new Set(['permission','identity','listing','source','recheck','final_identity']);
-  const BUSY = new Set(['arming','beginning','reading','saving','unknown']);
+  const BUSY = new Set(['arming','reconnecting','beginning','reading','saving','unknown']);
+  // Phases before anything is saved, while the bridge still holds the plan and can be told to cancel.
+  const UNSAVED = ['arming','reconnecting','beginning','reading'];
 
   const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
   const exactKeys = (value, keys) => isObject(value) && Object.keys(value).sort().join(',') === keys.slice().sort().join(',');
@@ -94,7 +96,7 @@
     const changed = () => { for (const fn of listeners) { try { fn(); } catch { /* a view error never stops the protocol */ } } };
     const set = (name, ms, fn) => { clear(name); timers[name] = deps.setTimeout(fn, ms); };
     function clear(name) { if (timers[name] !== undefined) { deps.clearTimeout(timers[name]); delete timers[name]; } }
-    const clearAll = () => ['begin','batch','request'].forEach(clear); // never the detection timer
+    const clearAll = () => ['begin','reconnect','batch','request'].forEach(clear); // never the detection timer
     const hex32 = () => Array.from(deps.crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
     const emit = (name, detail) => doc.dispatchEvent(new deps.CustomEvent(PREFIX + name, {detail}));
     const accounts = () => deps.getAccounts() || [];
@@ -163,7 +165,7 @@
     function discard(phase, message, {tellBridge = true, tellServer = true} = {}) {
       const check = client.check;
       if (!check) return;
-      if (tellBridge && ['arming','beginning','reading'].includes(check.phase)) emit('cancel', {batchId:check.batchId});
+      if (tellBridge && UNSAVED.includes(check.phase)) emit('cancel', {batchId:check.batchId});
       if (tellServer) cancelOnServer(check);
       for (const entry of check.entries) { entry.result = null; entry.state = entry.kind === 'read' ? 'discarded' : entry.state; }
       check.payload = null;
@@ -184,7 +186,10 @@
       if (sampleMode()) return {ok:false, message:'Sample data is never read from a real account. Clear the samples first.'};
       if (client.busy()) return {ok:false, message:'A check is already in progress.'};
       if (!pageRoot()) return {ok:false, message:'Open Resonance at http://127.0.0.1:4317/ in the browser that has the reader.', setup:true};
-      if (client.setup.status !== 'installed') return {ok:false, message:'The browser reader is not ready. Open account-check setup first.', setup:true};
+      // A disconnected worker (idle or restarted) is the one state a fresh trusted click may re-arm:
+      // the bridge reconnects inside this click, and nothing is reserved until a fresh setup answer arrives.
+      const reconnect = client.setup.status === 'offline';
+      if (client.setup.status !== 'installed' && !reconnect) return {ok:false, message:'The browser reader is not ready. Open account-check setup first.', setup:true};
       const chosen = [];
       for (const id of accountIds || []) {
         const account = accountNow(id);
@@ -201,8 +206,9 @@
       const seenIdentity = new Set(), seenChannel = new Set();
       for (const entry of entries) {
         if (entry.kind !== 'read') continue;
-        // A denied provider permission is an explicit held entry, never a silent skip.
-        if (client.setup[entry.provider] === false) {
+        // A denied provider permission is an explicit held entry, never a silent skip. After a
+        // disconnect the old grants are stale, so they are checked again on the fresh setup answer.
+        if (!reconnect && client.setup[entry.provider] === false) {
           Object.assign(entry, {kind:'held', state:'held', reason:'permission_needed', requestId:hex32()});
           continue;
         }
@@ -240,18 +246,46 @@
         setSetup({status:'absent'});
         return {ok:false, message:rejectionText('transport_unavailable'), setup:true};
       }
-      check.phase = 'beginning';
-      check.message = 'Reserving this check…';
+      // One budget from the click covers reconnecting and reserving: the bridge pins the plan for 5 s.
       set('begin', BEGIN_MS, () => {
-        if (client.check === check && check.phase === 'beginning') {
+        if (client.check === check && ['reconnecting','beginning'].includes(check.phase)) {
           discard('failed', 'The check took too long to start, so nothing was read. Try again.');
         }
       });
-      deps.request('/api/checks/begin', 'POST', {account_ids:entries.map(entry => entry.accountId)}).then(
-        job => onBegin(check, job), error => onBeginFailed(check, error));
-      changed();
+      if (reconnect) {
+        check.phase = 'reconnecting';
+        check.message = 'Reconnecting to the browser reader…';
+        set('reconnect', DETECT_MS, () => {
+          if (client.check !== check || check.phase !== 'reconnecting') return;
+          setSetup({status:'absent'});
+          discard('failed', 'The browser reader did not answer, so nothing was read. Try again, or open account-check setup.');
+        });
+        changed();
+        return {ok:true, note};
+      }
+      beginOnServer(check);
       return {ok:true, note};
     };
+
+    function beginOnServer(check) {
+      check.phase = 'beginning';
+      check.message = 'Reserving this check…';
+      deps.request('/api/checks/begin', 'POST', {account_ids:check.entries.map(entry => entry.accountId)}).then(
+        job => onBegin(check, job), error => onBeginFailed(check, error));
+      changed();
+    }
+    // After a reconnecting click, server work starts only from a fresh installed setup answer
+    // whose provider grants still cover every account in the plan the bridge is holding.
+    function settleReconnect() {
+      const check = client.check;
+      if (!check || check.phase !== 'reconnecting') return;
+      clear('reconnect');
+      if (client.setup.status !== 'installed') {
+        discard('failed', 'The browser reader is not ready, so nothing was read. Open account-check setup first.');
+      } else if (check.entries.some(entry => entry.kind === 'read' && client.setup[entry.provider] === false)) {
+        discard('failed', 'A site permission needed for this check is missing, so nothing was read. Open reader settings to allow it, then check again.');
+      } else beginOnServer(check);
+    }
 
     function onBeginFailed(check, error) {
       if (client.check !== check || check.phase !== 'beginning') return;
@@ -319,18 +353,19 @@
       setup(detail) {
         const tri = value => value === null || typeof value === 'boolean';
         if (!exactKeys(detail, ['version','protocol','x','youtube']) || detail.protocol !== EXPECTED.protocol ||
-            !tri(detail.x) || !tri(detail.youtube) || (detail.version !== null && typeof detail.version !== 'string')) { setSetup({status:'mismatch', reason:'setup_invalid'}); return; }
+            !tri(detail.x) || !tri(detail.youtube) || (detail.version !== null && typeof detail.version !== 'string')) { setSetup({status:'mismatch', reason:'setup_invalid'}); settleReconnect(); return; }
         clear('detect');
         const base = {version:detail.version, x:detail.x, youtube:detail.youtube};
         if (detail.version !== EXPECTED.version) setSetup(Object.assign(base, {status:'mismatch', reason:'version_mismatch'}));
         else setSetup(Object.assign(base, {status:'installed'}));
+        settleReconnect();
       },
       disconnected(detail) {
         if (!exactKeys(detail, ['reason','batchId'])) return;
         clear('detect');
         const check = client.check;
         setSetup({status:'offline', reason:typeof detail.reason === 'string' ? detail.reason : 'transport_disconnected'});
-        if (check && ['arming','beginning','reading'].includes(check.phase)) {
+        if (check && UNSAVED.includes(check.phase)) {
           discard('failed', 'The browser reader disconnected, so the whole check was discarded. Nothing was saved. Start a new check.', {tellBridge:false});
         }
       },
@@ -343,7 +378,7 @@
         const check = client.check;
         if (!check || detail.batchId !== check.batchId) { client.lastRejection = detail.reason; changed(); return; }
         if (check.phase === 'arming') { check.rejected = detail.reason; return; }
-        if (['beginning','reading'].includes(check.phase)) discard('failed', rejectionText(detail.reason), {tellBridge:false});
+        if (['reconnecting','beginning','reading'].includes(check.phase)) discard('failed', rejectionText(detail.reason), {tellBridge:false});
       },
       progress(detail) {
         const check = client.check;
@@ -378,7 +413,7 @@
       },
       cancelled(detail) {
         const check = client.check;
-        if (!check || !exactKeys(detail, ['batchId']) || detail.batchId !== check.batchId || !['arming','beginning','reading'].includes(check.phase)) return;
+        if (!check || !exactKeys(detail, ['batchId']) || detail.batchId !== check.batchId || !UNSAVED.includes(check.phase)) return;
         discard('cancelled', 'The check was cancelled. Nothing was read into your workspace and nothing was saved.', {tellBridge:false});
       },
     };
@@ -394,7 +429,7 @@
 
     client.cancel = () => {
       const check = client.check;
-      if (!check || !['arming','beginning','reading'].includes(check.phase)) return false;
+      if (!check || !UNSAVED.includes(check.phase)) return false;
       discard('cancelled', 'The check was cancelled. Nothing was saved.');
       return true;
     };
@@ -506,14 +541,14 @@
     // ---- workspace and account changes ----------------------------------------------------
     client.revalidate = () => {
       const check = client.check;
-      if (!check || !['arming','beginning','reading'].includes(check.phase)) return;
+      if (!check || !UNSAVED.includes(check.phase)) return;
       if (check.entries.some(entry => !sameSnapshot(entry.snapshot, accountNow(entry.accountId)))) {
         discard('failed', 'An account or its boundaries changed, so the check was stopped and nothing was saved. Start a new check.');
       }
     };
     client.reset = () => {
       const check = client.check;
-      if (check && ['arming','beginning','reading'].includes(check.phase)) discard('cancelled', 'The workspace changed, so the check was discarded.');
+      if (check && UNSAVED.includes(check.phase)) discard('cancelled', 'The workspace changed, so the check was discarded.');
       else if (check) { client.check = null; check.payload = null; clearAll(); }
       clearPointer();
       changed();

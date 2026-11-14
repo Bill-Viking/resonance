@@ -13,6 +13,13 @@ import stat
 import struct
 import sys
 import zipfile
+import zlib
+
+# A CLI plan must not write import caches into an audited export.
+if __name__ == '__main__':
+    sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import build_desktop
 
 
 SOURCE = Path(__file__).resolve().parent.parent / 'browser-reader'
@@ -89,6 +96,8 @@ def validate(files):
         manifest = json.loads(files['manifest.json'].decode('utf-8'))
     except (UnicodeDecodeError, ValueError) as error:
         fail('manifest.json is not valid JSON: %s' % error)
+    if not isinstance(manifest, dict):
+        fail('manifest.json must contain an object.')
     extra = set(manifest) - set(EXPECTED_MANIFEST) - OPTIONAL_MANIFEST_KEYS
     if extra:
         fail('Unexpected manifest keys: %s' % ', '.join(sorted(extra)))
@@ -155,20 +164,40 @@ def make_zip(files, target):
     with zipfile.ZipFile(target, 'w') as archive:
         for name in sorted(files):
             info = zipfile.ZipInfo(name, FIXED_TIME)
-            info.compress_type = zipfile.ZIP_DEFLATED
+            info.compress_type = zipfile.ZIP_STORED
             info.create_system = 3
             info.external_attr = (stat.S_IFREG | 0o644) << 16
-            archive.writestr(info, files[name], compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+            archive.writestr(info, files[name])
 
 
-def build(output, source=SOURCE):
-    output = Path(output).absolute()
+def output_path(output, runtime):
+    output = Path(output).expanduser().absolute()
     if output.exists() or output.is_symlink():
         fail('The output must be a new folder that does not exist yet: %s' % output)
-    if output.resolve().is_relative_to(Path(source).resolve()):
-        fail('Put the output outside the extension source folder.')
-    files = collect(Path(source))
+    if output.resolve().is_relative_to(Path(runtime).resolve()):
+        fail('Put the output outside the audited release export.')
+    return output
+
+
+def reader_files(contents):
+    available = {name[len('browser-reader/'):]: data for name, data in contents.items()
+                 if name.startswith('browser-reader/')}
+    missing = sorted(set(SHIPPED) - available.keys())
+    if missing:
+        fail('The release export is missing reader files: ' + ', '.join(missing))
+    return {name: available[name] for name in SHIPPED}
+
+
+def build(output, runtime, *, plan=False):
+    if output is not None:
+        output = output_path(output, runtime)
+    elif not plan:
+        fail('Provide a new output folder.')
+    _, manifest_sha, contents = build_desktop.verify_runtime(runtime)
+    files = reader_files(contents)
     manifest = validate(files)
+    if plan:
+        return manifest['version'], manifest_sha
     output.mkdir(parents=True)
     archive_name = 'resonance-reader-%s.zip' % manifest['version']
     archive = output / archive_name
@@ -178,6 +207,9 @@ def build(output, source=SOURCE):
         'name': manifest['name'],
         'version': manifest['version'],
         'protocol': PROTOCOL,
+        'source_manifest_sha256': manifest_sha,
+        'zlib_version': zlib.ZLIB_RUNTIME_VERSION,
+        'compression': 'stored',
         'zip': {'name': archive_name, 'sha256': digest(data), 'bytes': len(data)},
         'files': [{'path': name, 'sha256': digest(files[name]), 'bytes': len(files[name])} for name in sorted(files)],
     }
@@ -188,13 +220,20 @@ def build(output, source=SOURCE):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--out', required=True, help='a new folder for the ZIP and its SHA256 manifest')
+    parser.add_argument('--runtime', required=True, type=Path, help='an audited release export')
+    parser.add_argument('--out', help='a new folder for the ZIP and its SHA256 manifest')
+    parser.add_argument('--plan', action='store_true', help='validate the full export without writing output')
     args = parser.parse_args()
     try:
-        archive, listing, record = build(args.out)
-    except ValueError as error:
+        result = build(args.out, args.runtime.expanduser(), plan=args.plan)
+    except (OSError, ValueError) as error:
         print('Cannot build the reader package: %s' % error, file=sys.stderr)
         return 1
+    if args.plan:
+        version, manifest_sha = result
+        print(f'Validated Reader {version} from release manifest {manifest_sha}. No files written.')
+        return 0
+    archive, listing, record = result
     print('Built %s (%d bytes)' % (archive, record['zip']['bytes']))
     print('sha256 %s' % record['zip']['sha256'])
     print('manifest %s' % listing)

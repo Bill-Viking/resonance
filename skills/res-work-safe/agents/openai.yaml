@@ -1,0 +1,4 @@
+interface:
+  display_name: "Work Safe"
+  short_description: "Audit public posts for work-safe concerns"
+  default_prompt: "Use $res-work-safe to audit the public posts I specify."
