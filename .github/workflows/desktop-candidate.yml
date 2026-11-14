@@ -25,6 +25,8 @@ jobs:
       SHA_BUILD_LOCAL: 4762d718390fc9d456d1230274a4702e2e0401de68d42697f4deff79d06f2bf5
       SHA_TEST_BUILD_LOCAL: 6ce7c95f472315d089f0ecdb9b8ccf40cdc5de9b52e1410821cf83f86073c471
       SHA_FETCH: 684516c0edb26ddbddad7b09aa1fc471fd7b376aaca6cf69424db82f6387c1eb
+      SHA_DIAGNOSE_SUITE: 2abf8745d63e1908b998d3a4c62b4859002fccc523fb9b013ee8d8ea6636fec0
+      SHA_TEST_DIAGNOSE_SUITE: 7b4f75c2f428d7b97a4225cedd8f84f4c6acd2f70e3a0c357f812edadac2db64
     steps:
       # The recipe checkout is the workflow's own commit. The product checkout is the exact pinned
       # source, so recipe files never enter the export or make its Git tree dirty.
@@ -57,10 +59,14 @@ jobs:
           set -euo pipefail
           root="$RUNNER_TEMP/res-native-runtime"
           recipe="$GITHUB_WORKSPACE/recipe/.github/native-runtime"
+          bootstrap_python="$(command -v python)"
+          case "$bootstrap_python" in /*) ;; *) exit 1 ;; esac
+          test -x "$bootstrap_python"
           mkdir -m 0700 "$root"
           mkdir -m 0700 "$root/scripts" "$root/downloads"
           cp "$recipe/SOURCE-INPUTS.json" "$root/SOURCE-INPUTS.json"
           cp "$recipe/build-local.py" "$recipe/test_build_local.py" "$recipe/fetch.py" "$root/scripts/"
+          cp "$recipe/diagnose-suite.py" "$recipe/test_diagnose_suite.py" "$root/scripts/"
           check_sha() {
             actual="$(shasum -a 256 "$1" | cut -d ' ' -f 1)"
             if [ "$actual" != "$2" ]; then
@@ -72,7 +78,15 @@ jobs:
           check_sha "$root/scripts/build-local.py" "$SHA_BUILD_LOCAL"
           check_sha "$root/scripts/test_build_local.py" "$SHA_TEST_BUILD_LOCAL"
           check_sha "$root/scripts/fetch.py" "$SHA_FETCH"
+          check_sha "$root/scripts/diagnose-suite.py" "$SHA_DIAGNOSE_SUITE"
+          check_sha "$root/scripts/test_diagnose_suite.py" "$SHA_TEST_DIAGNOSE_SUITE"
           echo "RES_ROOT=$root" >> "$GITHUB_ENV"
+          echo "BOOTSTRAP_PYTHON=$bootstrap_python" >> "$GITHUB_ENV"
+      - name: Run the synthetic suite supervisor tests
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          "$BOOTSTRAP_PYTHON" -I -B "$RES_ROOT/scripts/test_diagnose_suite.py" 2>&1 | tee "$RES_ROOT/test-diagnose-suite.log"
       - name: Run the 38 synthetic build-recipe tests
         run: |
           set -euo pipefail
@@ -218,19 +232,37 @@ jobs:
         timeout-minutes: 10
         run: |
           set -euo pipefail
-          "$VENV_PYTHON" -E -s -u - <<'PY' 2>&1 | tee "$RES_ROOT/product-tests.log"
+          "$BOOTSTRAP_PYTHON" -I -B "$RES_ROOT/scripts/diagnose-suite.py" \
+            --output "$RES_ROOT/native-stack-diagnostic" --timeout 540 --sample-after 180 -- \
+            "$VENV_PYTHON" -E -s -u -c '
           import faulthandler
+          import json
+          import platform
           import runpy
+          import subprocess
           import sys
+          import sysconfig
+
+          print("runtime features: " + json.dumps({
+              "implementation": sys.implementation.name,
+              "version": list(sys.version_info[:3]),
+              "machine": platform.machine(),
+              "_USE_POSIX_SPAWN": getattr(subprocess, "_USE_POSIX_SPAWN", None),
+              "_HAVE_POSIX_SPAWN_CLOSEFROM": getattr(subprocess, "_HAVE_POSIX_SPAWN_CLOSEFROM", None),
+              "sysconfig": {name: bool(sysconfig.get_config_var(name)) for name in (
+                  "HAVE_FORK", "HAVE_VFORK", "HAVE_POSIX_SPAWN", "HAVE_POSIX_SPAWNP",
+                  "HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCLOSEFROM_NP",
+              )},
+          }, sort_keys=True))
 
           faulthandler.enable()
           faulthandler.dump_traceback_later(120, repeat=True)
-          sys.argv = ['unittest', 'discover', '-s', 'tests', '-v', '--durations', '15']
+          sys.argv = ["unittest", "discover", "-s", "tests", "-v", "--durations", "15"]
           try:
-              runpy.run_module('unittest', run_name='__main__', alter_sys=True)
+              runpy.run_module("unittest", run_name="__main__", alter_sys=True)
           finally:
               faulthandler.cancel_dump_traceback_later()
-          PY
+          '
       - run: node tests/test_ui_actions.cjs
       - run: node tests/test_ui_communication.cjs
       - run: node tests/test_ui_today.cjs
@@ -274,6 +306,7 @@ jobs:
             ${{ runner.temp }}/res-native-runtime/build-stdout.log
             ${{ runner.temp }}/res-native-runtime/test-build-local.log
             ${{ runner.temp }}/res-native-runtime/export-guard-diagnostic.log
-            ${{ runner.temp }}/res-native-runtime/product-tests.log
+            ${{ runner.temp }}/res-native-runtime/test-diagnose-suite.log
+            ${{ runner.temp }}/res-native-runtime/native-stack-diagnostic
           if-no-files-found: warn
           retention-days: 1
