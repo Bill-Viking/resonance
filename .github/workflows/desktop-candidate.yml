@@ -195,7 +195,42 @@ jobs:
           echo "$venv/bin" >> "$GITHUB_PATH"
           echo "VENV_PYTHON=$venv/bin/python" >> "$GITHUB_ENV"
       - run: python3 -I -c "import os, pathlib, sys; assert pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ['VENV_PYTHON']).parent.parent.resolve()"
-      - run: '"$VENV_PYTHON" -E -s -m unittest discover -s tests -v'
+      # Trace timers diagnose stalls and do not waive any product test.
+      - name: Diagnose the export guard in isolation
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          "$VENV_PYTHON" -E -s -u - <<'PY' 2>&1 | tee "$RES_ROOT/export-guard-diagnostic.log"
+          import faulthandler
+          import runpy
+          import sys
+
+          faulthandler.enable()
+          faulthandler.dump_traceback_later(30, repeat=True)
+          sys.argv = ['unittest', 'discover', '-s', 'tests', '-p', 'test_release.py', '-k',
+                      'different_commit_is_never_tagged', '-v', '--durations', '1']
+          try:
+              runpy.run_module('unittest', run_name='__main__', alter_sys=True)
+          finally:
+              faulthandler.cancel_dump_traceback_later()
+          PY
+      - name: Run all Python tests with bounded stall diagnostics
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          "$VENV_PYTHON" -E -s -u - <<'PY' 2>&1 | tee "$RES_ROOT/product-tests.log"
+          import faulthandler
+          import runpy
+          import sys
+
+          faulthandler.enable()
+          faulthandler.dump_traceback_later(120, repeat=True)
+          sys.argv = ['unittest', 'discover', '-s', 'tests', '-v', '--durations', '15']
+          try:
+              runpy.run_module('unittest', run_name='__main__', alter_sys=True)
+          finally:
+              faulthandler.cancel_dump_traceback_later()
+          PY
       - run: node tests/test_ui_actions.cjs
       - run: node tests/test_ui_communication.cjs
       - run: node tests/test_ui_today.cjs
@@ -238,5 +273,7 @@ jobs:
             ${{ runner.temp }}/res-native-runtime/build/logs
             ${{ runner.temp }}/res-native-runtime/build-stdout.log
             ${{ runner.temp }}/res-native-runtime/test-build-local.log
+            ${{ runner.temp }}/res-native-runtime/export-guard-diagnostic.log
+            ${{ runner.temp }}/res-native-runtime/product-tests.log
           if-no-files-found: warn
           retention-days: 1
