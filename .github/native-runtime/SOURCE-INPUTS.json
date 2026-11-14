@@ -1,0 +1,70 @@
+{
+  "format": 1,
+  "purpose": "isolated native Mac source-build experiment; not a signed or accepted release",
+  "deployment_target": "13.0",
+  "sources": [
+    {
+      "name": "cpython",
+      "version": "3.14.10",
+      "url": "https://www.python.org/ftp/python/3.14.10/Python-3.14.10.tgz",
+      "sha256": "9e4996c19ae5a3df31f10c37723661f71d3455d73bd005f79df7098e5cc13192",
+      "digest_source": "https://www.python.org/downloads/release/python-31410/"
+    },
+    {
+      "name": "openssl",
+      "version": "3.5.9",
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
+      "sha256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
+      "digest_source": "CPython v3.14.10 Mac/BuildScript/build-installer.py"
+    },
+    {
+      "name": "tcl",
+      "version": "9.0.4",
+      "url": "https://prdownloads.sourceforge.net/tcl/tcl9.0.4-src.tar.gz",
+      "sha256": "d0aed49230bc02a65c1e0229e65f34590a4b037ec40d546f32573b467f7551ea",
+      "digest_source": "CPython v3.14.10 Mac/BuildScript/build-installer.py"
+    },
+    {
+      "name": "tk",
+      "version": "9.0.5-pre-33904f039f48ed64",
+      "url": "https://core.tcl-lang.org/tk/tarball/33904f039f48ed64/tk9.0.5.tar.gz",
+      "sha256": "51ea4221578b994ec7768df9165c6682eef487a148a15003a74135c33cab35b5",
+      "digest_source": "https://mail.python.org/archives/list/pythonmac-sig@python.org/thread/K62QDWISCLKTN6AWCNEUISB7UBUULYLV/"
+    },
+    {
+      "name": "libffi",
+      "version": "3.5.2",
+      "url": "https://github.com/libffi/libffi/releases/download/v3.5.2/libffi-3.5.2.tar.gz",
+      "sha256": "f3a3082a23b37c293a4fcd1053147b371f2ff91fa7ea1b2a52e335676bac82dc",
+      "digest_source": "GitHub official release API asset digest"
+    },
+    {
+      "name": "xz",
+      "version": "5.8.4",
+      "url": "https://github.com/tukaani-project/xz/releases/download/v5.8.4/xz-5.8.4.tar.gz",
+      "sha256": "0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9",
+      "digest_source": "GitHub official release API asset digest; https://tukaani.org/xz/"
+    },
+    {
+      "name": "sqlite",
+      "version": "3.50.4",
+      "url": "https://www.sqlite.org/2025/sqlite-autoconf-3500400.tar.gz",
+      "sha256": "a3db587a1b92ee5ddac2f66b3edb41b26f9c867275782d46c3a088977d6a5b18",
+      "digest_source": "CPython v3.14.10 Mac/BuildScript/build-installer.py"
+    },
+    {
+      "name": "mpdecimal",
+      "version": "4.0.1",
+      "url": "https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-4.0.1.tar.gz",
+      "sha256": "96d33abb4bb0070c7be0fed4246cd38416188325f820468214471938545b1ac8",
+      "digest_source": "https://www.bytereef.org/mpdecimal/download.html"
+    },
+    {
+      "name": "zstd",
+      "version": "1.5.7",
+      "url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz",
+      "sha256": "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
+      "digest_source": "Python maintainer provenance clarification above"
+    }
+  ]
+}
