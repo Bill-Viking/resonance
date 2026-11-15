@@ -21,7 +21,7 @@ import zlib
 
 import assistant_kit
 from desktop import launch
-from tools import build_desktop
+from tools import build_desktop, prepare_build
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -138,12 +138,32 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.events.count('open http://127.0.0.1:' + str(port)), 1)
 
     def test_headless_self_test_uses_only_the_given_synthetic_folder(self):
-        result = launch.self_test(self.directory / 'data', 0, self.log)
+        tcl_modules = {'tkinter', '_tkinter'}
+        already_loaded = tcl_modules.intersection(sys.modules)
+        report = self.directory / 'result.json'
+        bootstrap = ("import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); "
+                     "runpy.run_module('desktop.launch', run_name='__main__', alter_sys=True)")
+        completed = subprocess.run(
+            [sys.executable, '-I', '-B', '-c', bootstrap, str(ROOT),
+             '--self-test', '--data-dir', str(self.directory / 'data'), '--port', '0',
+             '--log-dir', str(self.directory / 'logs'), '--self-test-report', str(report)],
+            cwd=self.directory, env=prepare_build.clean_environment(), stdin=subprocess.DEVNULL,
+            capture_output=True, close_fds=True, timeout=30)
+        self.assertEqual(tcl_modules.intersection(sys.modules) - already_loaded, set())
+        self.assertEqual(completed.returncode, 0, (completed.stdout, completed.stderr))
+        self.assertTrue(stat.S_ISREG(report.lstat().st_mode))
+        with report.open('rb') as stream:
+            raw = stream.read(65537)
+        self.assertLessEqual(len(raw), 65536)
+        result = json.loads(raw)
+        self.assertIsInstance(result, dict)
         self.assertTrue(result['ok'])
         self.assertFalse(result['frozen'])
         self.assertTrue(result['seed'])
         self.assertIs(result['tcl'], True)
         self.assertRegex(result['tcl_patch'], r'\A[0-9]+\.[0-9]+\.[0-9]+\Z')
+        self.assertIs(result['assistant_kit'], True)
+        self.assertEqual(result['version'], (ROOT / 'VERSION').read_text(encoding='utf-8').strip())
 
     def test_command_line_refuses_real_data_paths_without_the_self_test_flag(self):
         for argv in (['--data-dir', str(self.directory)], ['--port', '1'], ['--self-test']):

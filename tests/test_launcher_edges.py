@@ -1,4 +1,4 @@
-"""Exercise launcher edge cases with headless Tcl and synthetic data."""
+"""Exercise launcher edge cases with synthetic Tcl, server and data fixtures."""
 import contextlib
 import errno
 import io
@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -130,7 +130,10 @@ class LauncherEdges(unittest.TestCase):
         self.assertFalse(self.data.exists())
 
     def test_frozen_smoke_publishes_temp_kit_before_probe_and_always_stops_server(self):
-        import tkinter
+        toolkit = ModuleType('tkinter')
+        interpreter = mock.Mock()
+        interpreter.call.return_value = '9.0.4'
+        toolkit.Tcl = mock.Mock(return_value=interpreter)
 
         bundle = self.root / 'bundle'
         contents = dict.fromkeys(assistant_kit.REQUIRED, b'Synthetic file\n')
@@ -165,17 +168,18 @@ class LauncherEdges(unittest.TestCase):
         stopped = mock.Mock()
         FakeController.shutdown = stopped
         with mock.patch.object(sys, 'frozen', True, create=True), mock.patch.object(server, 'ROOT', bundle), \
-                mock.patch.object(tkinter, 'Tcl', wraps=tkinter.Tcl) as tcl, \
+                mock.patch.dict(sys.modules, {'tkinter': toolkit}), \
                 mock.patch.object(server, 'make_server', side_effect=lambda *args: SimpleNamespace()), \
                 mock.patch.object(launch, 'Controller', FakeController), mock.patch('zoneinfo.ZoneInfo'), \
                 mock.patch('urllib.request.build_opener', return_value=SimpleNamespace(open=open_page)) as opener:
             result = launch.self_test(self.data, 0, launch.Log(self.root / launch.LOG_NAME))
             opener.return_value.open = mock.Mock(side_effect=OSError('Synthetic HTTP failure'))
             failed = launch.self_test(self.data, 0, launch.Log(self.root / launch.LOG_NAME))
-        self.assertEqual(tcl.call_args_list, [mock.call(), mock.call()])
+        self.assertEqual(toolkit.Tcl.call_args_list, [mock.call(), mock.call()])
+        self.assertEqual(interpreter.call.call_args_list, [mock.call('info', 'patchlevel')] * 2)
         self.assertEqual(result, {'ok': True, 'assistant_kit': True, 'version': '1.2.3',
                                   'seed': True, 'frozen': True, 'tcl': True,
-                                  'tcl_patch': tkinter.Tcl().call('info', 'patchlevel')})
+                                  'tcl_patch': '9.0.4'})
         self.assertRegex(result['tcl_patch'], r'\A[0-9]+\.[0-9]+\.[0-9]+\Z')
         self.assertEqual(failed, {'ok': False, 'problem': 'check'})
         self.assertEqual(stopped.call_args_list, [mock.call(), mock.call()])
