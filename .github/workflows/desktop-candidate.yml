@@ -229,13 +229,6 @@ jobs:
           echo "$venv/bin" >> "$GITHUB_PATH"
           echo "VENV_PYTHON=$venv/bin/python" >> "$GITHUB_ENV"
       - run: python3 -I -c "import os, pathlib, sys; assert pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ['VENV_PYTHON']).parent.parent.resolve()"
-      # Diagnostic only; a probe result is not release acceptance.
-      - name: Run the bounded Tcl fork differential probe
-        timeout-minutes: 2
-        run: |
-          set -euo pipefail
-          "$BOOTSTRAP_PYTHON" -I -B "$RES_ROOT/scripts/probe-tcl-fork.py" \
-            --output "$RES_ROOT/tcl-fork-probe" 2>&1 | tee "$RES_ROOT/tcl-fork-probe.log"
       # Trace timers diagnose stalls and do not waive any product test.
       - name: Diagnose the export guard in isolation
         timeout-minutes: 3
@@ -269,6 +262,7 @@ jobs:
           import subprocess
           import sys
           import sysconfig
+          import tempfile
 
           print("runtime features: " + json.dumps({
               "implementation": sys.implementation.name,
@@ -286,7 +280,19 @@ jobs:
           faulthandler.dump_traceback_later(120, repeat=True)
           sys.argv = ["unittest", "discover", "-s", "tests", "-v", "--durations", "15"]
           try:
-              runpy.run_module("unittest", run_name="__main__", alter_sys=True)
+              try:
+                  runpy.run_module("unittest", run_name="__main__", alter_sys=True)
+              except SystemExit as exc:
+                  if exc.code is not None and not (isinstance(exc.code, int) and exc.code == 0):
+                      raise
+              assert "tkinter" not in sys.modules and "_tkinter" not in sys.modules, "Suite parent loaded Tcl"
+              print("Suite parent is Tcl-free")
+              with tempfile.TemporaryDirectory(prefix="resonance-spawn-canary-") as cwd:
+                  for _ in range(1000):
+                      subprocess.run(["/usr/bin/true"], cwd=cwd, env={"LC_ALL": "C"},
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, close_fds=True, check=True, timeout=2)
+              print("Completed 1000 close_fds=True spawns")
           finally:
               faulthandler.cancel_dump_traceback_later()
           '
@@ -320,6 +326,14 @@ jobs:
             ${{ runner.temp }}/candidate/pip-*.json
           if-no-files-found: error
           retention-days: 1
+      # The unsigned candidate is diagnostic evidence. A failed probe still fails the job;
+      # neither the artifact nor the probe is release acceptance.
+      - name: Run the bounded Tcl fork differential probe
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          "$BOOTSTRAP_PYTHON" -I -B "$RES_ROOT/scripts/probe-tcl-fork.py" \
+            --output "$RES_ROOT/tcl-fork-probe" 2>&1 | tee "$RES_ROOT/tcl-fork-probe.log"
       - name: Emit scrubbed native evidence in the job log
         if: always()
         timeout-minutes: 1
