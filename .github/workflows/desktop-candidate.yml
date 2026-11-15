@@ -19,7 +19,7 @@ jobs:
       DESKTOP_TARGET: macos-x86_64
       PYTHONNOUSERSITE: '1'
       # Exact audited public product source for this diagnostic.
-      PRODUCT_SOURCE_SHA: 6c2bbc0df69e28e7f2a670f3c4d60614f22de119
+      PRODUCT_SOURCE_SHA: d7564eb812f47b675f765143bc16f774d3cced0e
       # SHA-256 of the ten reviewed recipe files below .github/native-runtime/.
       SHA_SOURCE_INPUTS: d8e732285c937663dfc050a26f1c72f82e4d13186552998505d19dc761e0f16c
       SHA_BUILD_LOCAL: 4762d718390fc9d456d1230274a4702e2e0401de68d42697f4deff79d06f2bf5
@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 6c2bbc0df69e28e7f2a670f3c4d60614f22de119
+          ref: d7564eb812f47b675f765143bc16f774d3cced0e
           path: source
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
