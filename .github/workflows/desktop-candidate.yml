@@ -20,7 +20,7 @@ jobs:
       PYTHONNOUSERSITE: '1'
       # Exact audited public product source for this diagnostic.
       PRODUCT_SOURCE_SHA: 6c2bbc0df69e28e7f2a670f3c4d60614f22de119
-      # SHA-256 of the eight reviewed recipe files below .github/native-runtime/.
+      # SHA-256 of the ten reviewed recipe files below .github/native-runtime/.
       SHA_SOURCE_INPUTS: d8e732285c937663dfc050a26f1c72f82e4d13186552998505d19dc761e0f16c
       SHA_BUILD_LOCAL: 4762d718390fc9d456d1230274a4702e2e0401de68d42697f4deff79d06f2bf5
       SHA_TEST_BUILD_LOCAL: 6ce7c95f472315d089f0ecdb9b8ccf40cdc5de9b52e1410821cf83f86073c471
@@ -29,6 +29,8 @@ jobs:
       SHA_TEST_DIAGNOSE_SUITE: 7b4f75c2f428d7b97a4225cedd8f84f4c6acd2f70e3a0c357f812edadac2db64
       SHA_EMIT_EVIDENCE: f4f1357df7f572112a4b171b1a38650380a15118116e8fa70404534552929c4f
       SHA_TEST_EMIT_EVIDENCE: c22f925bd9acb54066e289ff1439cb4ea2eb44aa9b44a6a909fc3117758356f4
+      SHA_PROBE_TCL_FORK: acd7d17ed14fd2a3f06373e670f9eb8eee0c0ff62276add0bf0516f64eae91ae
+      SHA_TEST_PROBE_TCL_FORK: b0b578f8341552a1b5f81d829eb3767a2c87a334cd8541b7a6f36b24689388e1
     steps:
       # The recipe checkout is the workflow's own commit. The product checkout is the exact pinned
       # source, so recipe files never enter the export or make its Git tree dirty.
@@ -70,6 +72,7 @@ jobs:
           cp "$recipe/build-local.py" "$recipe/test_build_local.py" "$recipe/fetch.py" "$root/scripts/"
           cp "$recipe/diagnose-suite.py" "$recipe/test_diagnose_suite.py" "$root/scripts/"
           cp "$recipe/emit-evidence.py" "$recipe/test_emit_evidence.py" "$root/scripts/"
+          cp "$recipe/probe-tcl-fork.py" "$recipe/test_probe_tcl_fork.py" "$root/scripts/"
           check_sha() {
             actual="$(shasum -a 256 "$1" | cut -d ' ' -f 1)"
             if [ "$actual" != "$2" ]; then
@@ -85,6 +88,8 @@ jobs:
           check_sha "$root/scripts/test_diagnose_suite.py" "$SHA_TEST_DIAGNOSE_SUITE"
           check_sha "$root/scripts/emit-evidence.py" "$SHA_EMIT_EVIDENCE"
           check_sha "$root/scripts/test_emit_evidence.py" "$SHA_TEST_EMIT_EVIDENCE"
+          check_sha "$root/scripts/probe-tcl-fork.py" "$SHA_PROBE_TCL_FORK"
+          check_sha "$root/scripts/test_probe_tcl_fork.py" "$SHA_TEST_PROBE_TCL_FORK"
           echo "RES_ROOT=$root" >> "$GITHUB_ENV"
           echo "BOOTSTRAP_PYTHON=$bootstrap_python" >> "$GITHUB_ENV"
       - name: Run the synthetic suite supervisor tests
@@ -103,6 +108,11 @@ jobs:
           cd "$RES_ROOT"
           python -I scripts/test_build_local.py 2>&1 | tee "$RES_ROOT/test-build-local.log"
           grep -q '^Ran 38 tests' "$RES_ROOT/test-build-local.log"
+      - name: Run the synthetic Tcl fork probe tests
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          "$BOOTSTRAP_PYTHON" -I -B "$RES_ROOT/scripts/test_probe_tcl_fork.py" 2>&1 | tee "$RES_ROOT/test-probe-tcl-fork.log"
       - name: Fetch the nine pinned source archives
         run: |
           set -euo pipefail
@@ -219,6 +229,13 @@ jobs:
           echo "$venv/bin" >> "$GITHUB_PATH"
           echo "VENV_PYTHON=$venv/bin/python" >> "$GITHUB_ENV"
       - run: python3 -I -c "import os, pathlib, sys; assert pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ['VENV_PYTHON']).parent.parent.resolve()"
+      # Diagnostic only; a probe result is not release acceptance.
+      - name: Run the bounded Tcl fork differential probe
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          "$BOOTSTRAP_PYTHON" -I -B "$RES_ROOT/scripts/probe-tcl-fork.py" \
+            --output "$RES_ROOT/tcl-fork-probe" 2>&1 | tee "$RES_ROOT/tcl-fork-probe.log"
       # Trace timers diagnose stalls and do not waive any product test.
       - name: Diagnose the export guard in isolation
         timeout-minutes: 3
@@ -313,6 +330,23 @@ jobs:
             exit 0
           fi
           "$BOOTSTRAP_PYTHON" -I -B "$RES_ROOT/scripts/emit-evidence.py" "$RES_ROOT/native-stack-diagnostic"
+      - name: Emit scrubbed Tcl fork evidence in the job log
+        if: always()
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          failed=0
+          for arm in no-tcl ephemeral-tcl retained-tcl; do
+            echo "BEGIN Tcl fork evidence: $arm"
+            if [ -z "${BOOTSTRAP_PYTHON:-}" ] || [ -z "${RES_ROOT:-}" ] \
+                || [ ! -x "$BOOTSTRAP_PYTHON" ] || [ ! -f "$RES_ROOT/scripts/emit-evidence.py" ]; then
+              echo "Tcl fork evidence: bootstrap unavailable"
+            elif ! "$BOOTSTRAP_PYTHON" -I -B "$RES_ROOT/scripts/emit-evidence.py" "$RES_ROOT/tcl-fork-probe/$arm"; then
+              failed=1
+            fi
+            echo "END Tcl fork evidence: $arm"
+          done
+          exit "$failed"
       # Evidence only: no source archives, prefix, repo.git or private files.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -329,5 +363,12 @@ jobs:
             ${{ runner.temp }}/res-native-runtime/test-diagnose-suite.log
             ${{ runner.temp }}/res-native-runtime/test-emit-evidence.log
             ${{ runner.temp }}/res-native-runtime/native-stack-diagnostic
+            ${{ runner.temp }}/res-native-runtime/tcl-fork-probe/summary.json
+            ${{ runner.temp }}/res-native-runtime/tcl-fork-probe/*/receipt.json
+            ${{ runner.temp }}/res-native-runtime/tcl-fork-probe/*/product-tests.log
+            ${{ runner.temp }}/res-native-runtime/tcl-fork-probe/*/process-group.txt
+            ${{ runner.temp }}/res-native-runtime/tcl-fork-probe/*/stack-*.txt
+            ${{ runner.temp }}/res-native-runtime/tcl-fork-probe.log
+            ${{ runner.temp }}/res-native-runtime/test-probe-tcl-fork.log
           if-no-files-found: warn
           retention-days: 1
