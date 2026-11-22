@@ -95,6 +95,10 @@ class LocalAPITest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body, {'prompt': f'Read ASSISTANT.md in {server.ROOT} and run my Resonance check.'})
         self.assertEqual(headers['Cache-Control'], 'no-store')
+        status, body, headers = self.request('GET', '/api/assistant?purpose=social-inbox')
+        self.assertEqual(status, 200)
+        self.assertEqual(body, {'contract_path': str(server.ROOT / 'ASSISTANT.md')})
+        self.assertEqual(headers['Cache-Control'], 'no-store')
 
     def test_sample_http_cli_isolation_and_stale_tabs(self):
         real = self.account()

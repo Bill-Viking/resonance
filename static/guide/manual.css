@@ -1,0 +1,34 @@
+:root{color-scheme:dark;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0d1315;color:#eaf0ed}
+*{box-sizing:border-box}
+body{margin:0}
+main{max-width:52rem;margin:auto;padding:clamp(1rem,5vw,3rem)}
+h1,h2,h3,p,figure{margin:0}
+header{padding:1.5rem 0}
+h1{font-size:clamp(2.2rem,6vw,3.75rem);letter-spacing:-.05em;line-height:1.08;margin:.5rem 0 1rem}
+h2{font-size:clamp(1.6rem,4vw,2.25rem);letter-spacing:-.035em}
+h3{margin:1.7rem 0 .45rem;font-size:1.15rem}
+p{line-height:1.6;color:#c4cfcb}
+strong{color:#f1f4ee}
+.eyebrow,figcaption{font:600 .85rem/1.4 ui-monospace,monospace;color:#f6bc56}
+nav{display:flex;flex-wrap:wrap;gap:.5rem 1.4rem;margin-top:1.4rem}
+a{color:#8bdcda;text-underline-offset:.2em}
+section,footer{border-top:1px solid #384345;padding:1.8rem 0}
+section>img{display:block;width:100%;height:auto;border:1px solid #475152;border-radius:8px;margin:1rem 0}
+section>.dialog-shot{max-width:37.5rem}
+figure{margin:1rem 0;background:#151d1f;border:1px solid #485858;border-radius:12px;padding:clamp(.9rem,3vw,1.35rem)}
+figcaption{display:flex;flex-wrap:wrap;gap:.4rem 1rem;justify-content:space-between;margin-bottom:1rem}
+figcaption span{color:#abb9b6;font-weight:400}
+.turn{padding:.8rem 1rem;border-left:3px solid #e5b353;background:#222c2e}
+.turn strong{display:block;font-size:.85rem;margin-bottom:.2rem}
+.turn p{color:#e5edeb;overflow-wrap:anywhere}
+.answer{margin-top:.7rem;background:#1b2c2d;border-color:#78c7bf}
+dt{color:#f5c170;font-weight:650;margin-top:.85rem}
+dd{margin:.25rem 0;line-height:1.55;color:#c4cfcb}
+.project-chat{display:grid;grid-template-columns:minmax(7.5rem,24%) 1fr;gap:.9rem}
+.project-list{border-right:1px solid #455354;padding-right:.6rem}
+.project-list strong,.project-list span{display:block;font-size:.8rem;padding:.55rem}
+.project-list span{padding-left:1.2rem;color:#c4cfcb}
+.selected-project{background:#354746;border-radius:5px;padding:.5rem;color:#edfaf8}
+code{overflow-wrap:anywhere}
+@media(max-width:540px){.project-chat{grid-template-columns:1fr}.project-list{display:flex;align-items:center;flex-wrap:wrap;border-right:0}.project-list span{padding:.4rem}}
+@media print{:root{color-scheme:light;background:white;color:black}p,strong,.turn p{color:black}a{color:#23565a}.turn,figure,.answer{background:white}img,figure{break-inside:avoid}}

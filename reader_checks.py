@@ -632,8 +632,19 @@ def commit(api, store, db, job, body):
 
 
 # ---- reads ---------------------------------------------------------------------------------------
+def completed_order(value):
+    """Sort key for a stored completion time: the instant, tolerant of zone spelling; unreadable values sort oldest."""
+    try:
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00')).astimezone(timezone.utc)
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
 def summaries(db):
-    rows = db.execute('SELECT data,origin FROM reader_checks ORDER BY rowid DESC LIMIT ?', (SUMMARY_LIMIT,)).fetchall()
+    """Newest completed checks first, whatever order they were saved or restored in; ties fall back to save order."""
+    keyed = sorted(db.execute("SELECT rowid AS position,json_extract(data,'$.completed_at') AS at FROM reader_checks").fetchall(),
+                   key=lambda row: (completed_order(row['at']), row['position']), reverse=True)[:SUMMARY_LIMIT]
+    rows = [db.execute('SELECT data,origin FROM reader_checks WHERE rowid=?', (row['position'],)).fetchone() for row in keyed]
     recent = []
     for row in rows:
         receipt = json.loads(row['data'])

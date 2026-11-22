@@ -1,51 +1,38 @@
-# Resonance Mac app (optional)
+# Resonance Source Launcher for Mac
 
-`mac-launcher/` builds a small click-to-open app for macOS. It uses the Resonance
-speech-bubble icon, opens your default browser and needs no Terminal window. It is
-a convenience for people comfortable with a build step; `./resonance` remains the
-supported way to start Resonance.
+This optional convenience launcher starts an audited source release with the Mac's `/usr/bin/python3` (3.9 or newer). It is distinct from the self-contained desktop app: its name is **Resonance Source Launcher**, and its bundle identifier ends in `.resonance.launcher`. The source release must stay in its selected folder. `./resonance` remains available for a normal Terminal launch.
 
-The native wrapper runs a bundled Python helper. The helper checks the local
-index page, reuses a matching listener, or starts the selected copy in the
-background. A file lock prevents repeated clicks through this launcher from
-starting several servers. A startup failure appears in a dialog; a listener
-with a different index page is left alone. Closing the browser leaves the local server
-running; after a restart, clicking the icon starts it again. It is not a login
-item, a scheduler, a separate browser window or a connection to any platform.
+## Build
 
-## Build and update
+First make a clean audited export with `tools/make_release.py`. The launcher builder verifies that export's manifest and file hashes; it refuses the working tree, missing files and changed bytes.
 
-Build against a finished copy of a release in a folder of its own, never an
-unfinished working tree:
-
-```sh
-python3 mac-launcher/build.py --runtime "/path/to/a/finished/copy/of/resonance"
+```
+python3 mac-launcher/build.py --runtime /path/to/audited/runtime
 ```
 
-The output defaults to `~/Applications/Resonance.app`. The builder refuses to
-overwrite an existing app; set the old one aside first, then rebuild and verify
-before replacing it. It uses the Mac's developer tools, AppKit's SVG renderer,
-iconutil and a local ad-hoc code signature. The helper uses `/usr/bin/python3`
-(3.9 or newer). The bundle identifier is `io.github.<owner>.resonance`, with the
-owner read from `release.json`. The build records the runtime folder, and the
-data folder Resonance resolved at build time, in the app's bundled config; the
-source checkout is not needed to open the app.
+The default output is `~/Applications/Resonance Source Launcher.app`. The builder refuses to replace an existing app. It needs the Mac developer tools and creates an ad-hoc signature, not a Developer ID signature. It derives the version from `VERSION`, requires a valid owner in `release.json`, and sets the compiler and bundle minimum to macOS 13. Native minimum-OS acceptance remains separate.
 
-Rebuild when you select another release. The helper compares the served index
-page with the selected copy. It refuses a listener with a different page, but it
-cannot tell apart two releases whose index page is identical. Stop the previous
-Resonance server before you switch releases; do not rely on the launcher to
-identify the whole release. Your data stays in
-your Resonance data folder. The launcher's own log and lock file are kept in
-`~/Library/Application Support/Resonance`.
+The config records the verified runtime location and release fingerprints. Normally the server resolves the saved-data folder when it starts, including its existing legacy-folder rules. An explicit `--data-dir` pins a chosen folder. Neither rebuilding nor stopping deletes saved data. Logs and ownership files live separately in `~/Library/Logs/Resonance Source Launcher`; the current and rotated log are each bounded to 256 KiB.
+
+## Start and stop
+
+Opening the launcher starts an owned supervisor and server, waits for the matching page, then opens the browser. Repeated clicks reuse only that launcher's owned server. A different or unknown listener is left alone. Closing the browser leaves the server running.
+
+Stop the server through the helper inside the same app:
+
+```
+/usr/bin/python3 "$HOME/Applications/Resonance Source Launcher.app/Contents/Resources/launch.py" --stop
+```
+
+The supervisor checks the exact direct child, command, birth identity and ownership record before terminating it. The command never signals a process merely because it uses port 4317 or has a saved PID. A missing, stale or unknown owner produces a refusal. It cannot adopt or stop a background process left by an older preview. Quit that earlier copy through its original Terminal or process controls after identifying it.
+
+Stop the old owned release before rebuilding or switching runtimes. The helper checks the stored manifest, server and page fingerprints on launch, but a matching page alone is not release authentication. This source convenience launcher does not replace signed consumer-install testing.
 
 ## Checks
 
-```sh
+```
 python3 -m unittest discover -s tests -p test_mac_launcher.py -v
+python3 -m unittest discover -s tests -p test_legacy_build.py -v
 ```
 
-Six process checks: a cold start and reuse, four clicks at once, a conflicting
-release left alone, a missing runtime, a changed runtime, and a failed start
-with a local log. They use temporary synthetic servers and data. Nothing real
-is touched.
+Tests use temporary synthetic servers, files and ownership records. They cover repeated starts, conflicting listeners, safe stopping, changed releases, bounded logs and builder validation. Native wrapper execution and an upgrade from an installed older preview remain separate acceptance checks.

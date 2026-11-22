@@ -5,6 +5,10 @@ import json
 from pathlib import Path
 import sqlite3
 import sys
+
+# The external assistant may run this from a verified kit. Keep its files intact.
+sys.dont_write_bytecode = True
+
 import samples
 
 from server import (Invalid, MAX_BODY, Store, data_directory, identifier, safe_data_directory,

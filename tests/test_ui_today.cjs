@@ -56,30 +56,160 @@ function setup() {
   const document = {querySelector:get,querySelectorAll(selector){return selector === '[data-nav]' ? nav : [];},createElement(){return element();},documentElement:element(),activeElement:null,visibilityState:'visible'};
   const data = fixture(), calls = [];
   let handler = () => {throw new Error('Unexpected request');};
-  const context = {document,URL,Intl,console,location:{hash:'#overview'},window:{scrollTo(){}},navigator:{clipboard:{writeText:async()=>{}}},matchMedia:()=>({matches:false}),setTimeout:()=>1,clearTimeout(){},fetch:async(url,options)=>{calls.push({url,...options});return handler(url,options);}};
+  const clipboard = [];
+  const context = {document,URL,Intl,console,location:{hash:'#overview'},window:{scrollTo(){}},navigator:{clipboard:{writeText:async text=>{clipboard.push(text);}}},matchMedia:()=>({matches:false}),setTimeout:()=>1,clearTimeout(){},fetch:async(url,options)=>{calls.push({url,...options});return handler(url,options);}};
   vm.createContext(context);
   const source = fs.readFileSync(path.join(__dirname,'../static/app.js'),'utf8');
   const cutoff = source.indexOf("  document.addEventListener('click'");
   assert.ok(cutoff > 0);
-  vm.runInContext(source.slice(0,cutoff) + '\n globalThis.ui={state,todayRequests,inboxCard,renderNav,renderOverview,renderAccounts,renderSetup,renderDraft,todayReportContent,todayMail,todayAccountAttention,communicationSignature,sourceStateSignature,monitoringSignature,updateSourceView,updateCommunicationView,updateMonitoringView,refreshMonitoring,aboutDialog,handleAction};\n})();',context);
+  vm.runInContext(source.slice(0,cutoff) + '\n globalThis.ui={state,render,renderReview,todayNeedsYou,todayWaiting,todaySummary,todayKept,todayRequests,inboxCard,renderNav,renderOverview,renderAccounts,renderSetup,renderDraft,todayReportContent,todayMail,todayAccountAttention,communicationSignature,sourceStateSignature,monitoringSignature,updateSourceView,updateCommunicationView,updateMonitoringView,refreshMonitoring,aboutDialog,dialogCancel,dialogKeydown,handleAction,renderSocialInbox,openSocialInbox,prepareSocialInbox,socialInboxInput,setSocialInboxStatus};\n})();',context);
   context.ui.state.data = structuredClone(data);
   context.ui.state.connected = true;
   context.ui.state.view = 'overview';
   context.ui.state.communicationSignature = context.ui.communicationSignature();
   context.ui.state.sourceSignature = context.ui.sourceStateSignature();
   context.ui.state.monitorSignature = context.ui.monitoringSignature();
-  return {ui:context.ui,data,document,get,nav,calls,setHandler(fn){handler=fn;},setMissing(selector,value=true){if(value)missing.add(selector);else missing.delete(selector);}};
+  return {ui:context.ui,data,document,get,nav,calls,clipboard,location:context.location,setHandler(fn){handler=fn;},setMissing(selector,value=true){if(value)missing.add(selector);else missing.delete(selector);}};
 }
 
 const response = data => ({ok:true,json:async()=>structuredClone(data)});
+const openReviewChooser = async harness => {
+  await harness.ui.handleAction({dataset:{action:'choose-review'}});
+  return harness.get('#dialog-content').innerHTML;
+};
+function escapeDialog(harness) {
+  let prevented = false;
+  const event = {key:'Escape',preventDefault(){prevented=true;}};
+  harness.ui.dialogKeydown(event);
+  if (!prevented) harness.ui.dialogCancel(event);
+  assert.equal(prevented,false,'Escape can dismiss a review dialog without a writing-discard prompt');
+  harness.get('#dialog').close(); // Native default after an unprevented cancel event.
+}
+
+async function testSocialInbox() {
+  const t = setup(), {ui,get,calls,clipboard} = t;
+  const form = {...element(),querySelector:get};
+  const run = (action, dataset = {}) => ui.handleAction({...element(),dataset:{action,...dataset}});
+  const assistant = () => t.setHandler((url,request) => {
+    assert.equal(url,'/api/assistant?purpose=social-inbox');
+    assert.equal(request.method,'GET');
+    assert.equal(request.body,undefined);
+    return response({contract_path:'/tmp/example-kit/ASSISTANT.md'});
+  });
+  assert.match(ui.renderOverview(),/href="#social-inbox"/);
+  Object.assign(ui.state,{view:'social-inbox'});
+  ui.state.data.workspace = {mode:'real',token:'example-live'};
+  const scope = ui.renderSocialInbox();
+  assert.match(scope,/Choose one saved account/);
+  assert.match(scope,/exact-x.+exact-linked/);
+  assert.doesNotMatch(scope,/primary@example\.test|All saved|social-inbox-consent/);
+  get('#social-inbox-task').value = 'notifications';
+  for (const selection of ['', 'all', 'account:mail']) {
+    get('#social-inbox-account').value = selection;
+    ui.openSocialInbox(form);
+    assert.match(ui.renderSocialInbox(),/Set the scope/);
+  }
+  get('#social-inbox-account').value = 'account:x';
+  ui.openSocialInbox(form);
+  assert.match(ui.renderSocialInbox(),/Notification triage/);
+  assert.match(ui.renderSocialInbox(),/10 newest visible notifications.+badge/);
+  get('#social-inbox-summary').value = 'Example & <script>\nAnother notification';
+  await run('social-inbox-add');
+  ui.setSocialInboxStatus({dataset:{socialInboxNote:'0'},value:'reply'});
+  ui.setSocialInboxStatus({dataset:{socialInboxNote:'1'},value:'handled'});
+  const triage = ui.renderSocialInbox();
+  assert.match(triage,/Example &amp; &lt;script&gt;/);
+  assert.match(triage,/value="reply" selected/);
+  assert.match(triage,/value="handled" selected/);
+  get('#social-inbox-summary').value = Array.from({length:9},(_,i)=>`Example ${i}`).join('\n');
+  await run('social-inbox-add');
+  assert.match(ui.renderSocialInbox(),/2 of 10 summaries/,'over-limit paste leaves the current list intact');
+  await ui.prepareSocialInbox(form);
+  assert.equal(calls.length,0,'local triage and unchecked consent make no requests');
+  assistant();
+  get('#social-inbox-consent').checked = true;
+  await ui.prepareSocialInbox(form);
+  await run('social-inbox-copy',{field:'request'});
+  const request = clipboard[0];
+  assert.match(request,/Social inbox assistance.+\n"\/tmp\/example-kit\/ASSISTANT\.md"/);
+  assert.match(request,/"handle":"exact-x"/);
+  assert.match(request,/10 newest visible notifications/);
+  assert.match(request,/coverage gaps/);
+  assert.match(request,/Do not send, publish, edit, react, mark anything read or unread, dismiss notifications, or accept requests/);
+  assert.doesNotMatch(request,/exact-linked|primary@example\.test|Another notification|run my Resonance check/);
+  assert.equal(calls.length,1,'copying a request makes no additional call');
+  assert.match(ui.renderSocialInbox(),/2 of 10 summaries/,'creating the prompt preserves local work');
+  await run('social-inbox-clear');
+  assert.match(get('#dialog-content').innerHTML,/Clear this inbox workspace/);
+  await run('social-inbox-confirm-clear');
+  assert.doesNotMatch(ui.renderSocialInbox(),/Another notification/);
+
+  get('#social-inbox-task').value = 'conversation';
+  get('#social-inbox-account').value = 'account:linked';
+  ui.openSocialInbox(form);
+  assert.match(ui.renderSocialInbox(),/read receipt/);
+  ui.socialInboxInput({id:'social-inbox-message',value:'Example private </textarea> message'});
+  ui.socialInboxInput({id:'social-inbox-draft',value:'Example edited reply'});
+  await run('social-inbox-copy',{field:'draft'});
+  assert.equal(clipboard[1],'Example edited reply');
+  assert.match(ui.renderSocialInbox(),/Example private &lt;\/textarea&gt; message/);
+  await ui.prepareSocialInbox(form);
+  assert.equal(calls.length,1,'local writing and copying require no external authorization or API call');
+  get('#social-inbox-thread').value = 'Example thread "A"';
+  get('#social-inbox-consent').checked = true;
+  await ui.prepareSocialInbox(form);
+  await run('social-inbox-copy',{field:'request'});
+  const conversation = clipboard[2];
+  assert.ok(conversation.includes(`(identifier only): ${JSON.stringify('Example thread "A"')}`));
+  assert.match(conversation,/"handle":"exact-linked"/);
+  assert.match(conversation,/10 newest available text messages/);
+  assert.match(conversation,/read receipt/);
+  assert.doesNotMatch(conversation,/exact-x|Example private|Example edited reply/);
+
+  const changed = structuredClone(ui.state.data);
+  changed.accounts.find(account=>account.id==='linked').handle = 'replacement-handle';
+  t.setHandler(url => {assert.equal(url,'/api/state');return response(changed);});
+  await ui.refreshMonitoring();
+  assert.match(get('#main').innerHTML,/Set the scope/,'an identity change clears the scope on refresh');
+  assert.doesNotMatch(get('#main').innerHTML,/Example private|Example edited reply/);
+  await run('social-inbox-copy',{field:'draft'});
+  assert.equal(clipboard.length,3,'a cleared draft cannot be copied');
+
+  get('#social-inbox-account').value = 'account:x';
+  ui.openSocialInbox(form);
+  ui.socialInboxInput({id:'social-inbox-draft',value:'Another private reply'});
+  let returnContract;
+  t.setHandler(url => {
+    assert.equal(url,'/api/assistant?purpose=social-inbox');
+    return new Promise(resolve=>{returnContract=()=>resolve(response({contract_path:'/tmp/example-kit/ASSISTANT.md'}));});
+  });
+  const pending = ui.prepareSocialInbox(form);
+  ui.state.data.workspace = {mode:'samples',token:'example-sample'};
+  assert.match(ui.renderSocialInbox(),/Use your own workspace/);
+  returnContract();
+  await pending;
+  await ui.prepareSocialInbox(form);
+  ui.state.data.workspace = {mode:'real',token:'example-next-live'};
+  assert.doesNotMatch(ui.renderSocialInbox(),/Another private reply/);
+  assert.doesNotMatch(ui.renderSocialInbox(),/Assistant request ready/);
+  assert.equal(calls.length,4,'sample mode makes no inbox request and ignores a late real-workspace response');
+}
 
 (async()=>{
+  await testSocialInbox();
   const empty = setup();
   empty.ui.state.data = {settings:{theme:'dark'},accounts:[],reviews:[],source_items:[],action_requests:[],communication:{messages:[]},monitoring:{runs:[]}};
   const welcome = empty.ui.renderOverview();
-  const pitch = 'Resonance is a private notebook of what you have said online. Paste your writing, try samples, or set up the separate browser reader. Your own assistant can also bring in posts for review.';
+  assert.match(welcome,/href="#social-inbox"/);
+  const pitch = 'Paste a post, comment or reply you wrote. Resonance marks wording that may land badly for that account, using a short list of built-in English wording rules, not an AI. It is saved on this computer only. Nothing is posted or changed online.';
   assert.ok(welcome.includes(pitch));
-  for (const door of ['Set up account checks','Paste my first post','Try samples']) assert.ok(welcome.includes(door));
+  for (const door of ['Set up account checks','Paste my first post','Try samples','Ask my assistant']) assert.ok(welcome.includes(door));
+  assert.ok(welcome.includes('<h1>Check something you posted.</h1>'),'the headline says what to do');
+  assert.equal((welcome.match(/class="button primary/g)||[]).length,1,'Welcome has exactly one primary action');
+  assert.ok(welcome.includes('class="button primary welcome-primary" data-action="welcome-paste"'),'the primary is the paste action');
+  assert.ok(!welcome.includes('step-number') && !/>0[1-3]</.test(welcome),'the other ways to start are not numbered steps');
+  assert.ok(welcome.indexOf('welcome-paste') < welcome.indexOf('start-samples') && welcome.indexOf('start-samples') < welcome.indexOf('reader-setup') && welcome.indexOf('reader-setup') < welcome.indexOf('connect-assistant') && welcome.indexOf('connect-assistant') < welcome.indexOf('your-data'),'paste leads, then samples, reader setup, assistant and the data door');
+  assert.ok(welcome.includes('Other ways to start') && /not an AI/.test(welcome),'the copy names local English rules and no AI');
   assert.ok(welcome.includes('data-action="your-data"'));
   assert.ok(welcome.indexOf(pitch) < welcome.indexOf('Set up account checks'));
   empty.ui.aboutDialog();
@@ -88,12 +218,118 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   assert.ok(empty.get('#dialog-content').innerHTML.includes('Check wording without an account'),'Paste my first post starts the account flow and keeps the no-account route');
   assert.ok(empty.ui.renderDraft().includes('General writing check'),'the paste road works without an account');
 
+  assert.ok(welcome.indexOf('data-action="choose-review"') > welcome.indexOf('Other ways to start'));
+  assert.ok(!welcome.includes('data-mode='),'review cards are absent from the Welcome page');
+  await empty.ui.handleAction({dataset:{action:'close-dialog'}});
+  const chooser = await openReviewChooser(empty);
+  assert.ok(chooser.includes('<h2 id="dialog-title">Choose a review</h2>'));
+  assert.ok(chooser.includes('Reviews use your assistant. Draft checks run here.'));
+  assert.equal((chooser.match(/class="review-mode-card"/g)||[]).length,4);
+  for (const label of ['Work Safe','Privacy Check','Voice &amp; Tone','Before You Post']) {
+    assert.ok(chooser.includes(label),'startup offers each review mode inside the chooser');
+  }
+  await empty.ui.handleAction({dataset:{action:'review-mode',mode:'work_safe'}});
+  assert.ok(empty.get('#dialog-content').innerHTML.includes('data-action="add-account"'),'empty mode routes to real account setup');
+  assert.equal(empty.calls.length,0,'choosing a mode reads no provider and saves no request');
+
+  const modes = setup();
+  const chooseMode = async mode => {
+    const choices = await openReviewChooser(modes);
+    assert.ok(choices.includes(`data-action="review-mode" data-mode="${mode}"`));
+    await modes.ui.handleAction({dataset:{action:'review-mode',mode}});
+  };
+  const prepareMode = mode => modes.ui.handleAction(Object.assign(element(),{dataset:{action:'prepare-review-mode',mode}}));
+  await chooseMode('work_safe');
+  const scopeDialog = modes.get('#dialog-content').innerHTML;
+  assert.equal(modes.calls.length,0,'opening the chooser and selecting a mode make no API call');
+  assert.ok(scopeDialog.includes('exact-x') && scopeDialog.includes('exact-linked'));
+  assert.ok(!scopeDialog.includes('primary@example.test'),'mail never appears in mode account choices');
+  await prepareMode('work_safe');
+  assert.equal(modes.calls.length,0,'an explicit account and scope are required');
+  assert.match(modes.get('#dialog-error').textContent,/Choose the account and review scope/);
+  modes.get('#review-mode-account').value='account:x';
+  modes.get('#review-mode-scope').value='all';
+  modes.setHandler(()=>response({prompt:'Read ASSISTANT.md in /tmp/synthetic-resonance and run my Resonance check.'}));
+  await prepareMode('work_safe');
+  const safeRequest=modes.get('#dialog-content').innerHTML;
+  for(const wording of ['docs/SAFE-WORK.md','all accessible public posts','do not substitute a sample','do not edit, delete or publish anything','Nothing has started yet']) assert.ok(safeRequest.includes(wording));
+  assert.ok(safeRequest.includes('exact-x') && !safeRequest.includes('exact-linked'),'one-account scope stays exact');
+  assert.ok(!safeRequest.includes('primary@example.test'));
+  assert.deepEqual(modes.calls.map(call=>call.url),['/api/assistant'],'preparing a mode only reads the local handoff sentence');
+  assert.ok(modes.calls.every(call=>!call.method || call.method==='GET'));
+  for(const [mode,focus] of [['privacy','without copying its values'],['voice','Preserve my intent']]) {
+    await chooseMode(mode);
+    modes.get('#review-mode-account').value='all';modes.get('#review-mode-scope').value='recent';
+    await prepareMode(mode);
+    const request=modes.get('#dialog-content').innerHTML;
+    assert.ok(request.includes(focus) && request.includes('25 newest'));
+    assert.ok(request.includes('exact-x') && request.includes('exact-linked') && !request.includes('primary@example.test'));
+    assert.ok(request.includes('Apply the saved account boundaries in every mode'));
+  }
+  modes.ui.state.data.accounts.push({id:'all',platform:'X',handle:'exact-all-id',url:'https://x.com/exact-all-id'});
+  await chooseMode('privacy');
+  const literalAllChoice=modes.get('#dialog-content').innerHTML.match(/<option value="([^"]+)">X · exact-all-id<\/option>/);
+  assert.ok(literalAllChoice,'the specific account has its own visible choice');
+  modes.get('#review-mode-account').value=literalAllChoice[1];
+  modes.get('#review-mode-scope').value='recent';
+  await prepareMode('privacy');
+  const literalAllRequest=modes.get('#dialog-content').innerHTML;
+  assert.ok(literalAllRequest.includes('exact-all-id') && !literalAllRequest.includes('exact-x') && !literalAllRequest.includes('exact-linked'),
+    'an account whose id is all remains a single-account review');
+  modes.ui.state.draft='An existing unfinished draft';
+  const beforeDraft=modes.calls.length;
+  await openReviewChooser(modes);
+  escapeDialog(modes);
+  assert.equal(modes.ui.state.draft,'An existing unfinished draft','Escape from the chooser preserves Compose text');
+  await chooseMode('draft');
+  assert.equal(modes.ui.state.draft,'An existing unfinished draft','Before You Post preserves an unfinished draft');
+  assert.ok(modes.ui.renderDraft().includes('An existing unfinished draft'));
+  assert.equal(modes.location.hash,'draft','Before You Post navigates to Compose');
+  assert.equal(modes.get('#dialog').open,false,'opening Compose dismisses the chooser');
+  assert.equal(modes.calls.length,beforeDraft,'opening Compose does not prepare an external review');
+  modes.ui.state.data.workspace={mode:'samples'};
+  await chooseMode('privacy');
+  assert.ok(modes.get('#dialog-content').innerHTML.includes('You are in the sample workspace'));
+  await prepareMode('privacy');
+  assert.equal(modes.calls.length,beforeDraft,'sample identities cannot enter a real review request');
+  assert.deepEqual(modes.clipboard,[],'opening a mode and preparing requests never copies automatically');
+
+  const cancelledMode=setup();
+  await openReviewChooser(cancelledMode);
+  await cancelledMode.ui.handleAction({dataset:{action:'review-mode',mode:'privacy'}});
+  cancelledMode.get('#review-mode-account').value='account:x';cancelledMode.get('#review-mode-scope').value='all';
+  cancelledMode.get('#dialog').querySelectorAll = () => [
+    {id:'review-mode-account',tagName:'SELECT',selectedIndex:1,options:[{},{}]},
+    {id:'review-mode-scope',tagName:'SELECT',selectedIndex:2,options:[{},{},{}]},
+  ];
+  let releaseMode;
+  cancelledMode.setHandler(()=>new Promise(resolve=>{releaseMode=resolve;}));
+  const pendingMode=cancelledMode.ui.handleAction(Object.assign(element(),{dataset:{action:'prepare-review-mode',mode:'privacy'}}));
+  escapeDialog(cancelledMode);
+  releaseMode(response({prompt:'Read ASSISTANT.md in /tmp/synthetic-resonance.'}));
+  await pendingMode;
+  assert.equal(cancelledMode.get('#dialog').open,false,'a late local response does not reopen a cancelled mode dialog');
+
   const t = setup();
   const today = t.ui.renderOverview();
   for (const hook of ['today-grid','today-main','today-side','terminal-panel','today-report','today-mail-row','today-access-row','today-summary']) assert.ok(today.includes(hook),`Today includes ${hook}`);
   for (const id of ['source-need','source-wait','source-verify','source-unknown']) assert.equal((today.match(new RegExp(`data-source-id="${id}"`,'g'))||[]).length,1,`${id} appears once on Today`);
-  assert.equal((today.match(/id="res-check-now"/g)||[]).length,1,'Today has exactly one fixed Check now button');
-  assert.ok(today.indexOf('id="res-check-now"') < today.indexOf('id="today-summary-content"'),'Check now leads Today');
+  assert.ok(!today.includes('id="res-check-now"'),'no dead Check now when the reader helper is not loaded');
+  assert.equal((today.match(/data-action="add-excerpt"/g)||[]).length,1,'Today has one paste control');
+  assert.ok(today.includes('Paste a post') && !today.includes('Check a post') && !today.includes('Paste text'),'one label for the paste action');
+  const lead = today.slice(today.indexOf('id="reader-today"'),today.indexOf('class="today-grid"'));
+  assert.equal((lead.match(/class="button primary"/g)||[]).length,1,'the lead panel has exactly one primary');
+  assert.ok(lead.includes('class="button quiet reader-review-button" data-action="choose-review"'));
+  assert.ok(lead.includes('data-action="connect-assistant"') && lead.includes('data-action="reader-setup"'));
+  assert.ok(!today.includes('data-mode='),'review cards are absent from Today');
+  const order = ['<h1>Today</h1>','id="today-summary-content"','id="reader-today"','id="today-needs-you-content"','id="today-report-content"','id="today-kept-content"'].map(key => today.indexOf(key));
+  assert.ok(order.every((position,index) => position >= 0 && (!index || order[index-1] < position)),'order: heading, status and counts, lead action, needs you, report, kept line');
+  assert.ok(today.includes('1 post needs your decision.'),'a status sentence opens Today');
+  for (const [status,count] of [['needs_you',1],['waiting',1],['verification_pending',2]]) assert.match(today,new RegExp(`data-status="${status}"><span>[^<]+</span><strong>${count}</strong>`),`${status} count matches the Posts source count`);
+  assert.ok(today.includes('aria-label="Open needs-you posts: 1"'),'a count control names its count for screen readers');
+  assert.ok(!today.includes('Open Posts') && !today.includes('today-empty'),'no filler panels');
+  assert.ok(today.includes('Export brief') && today.indexOf('Export brief') > today.indexOf('id="today-report-content"'),'Export brief sits in the closing line');
+  assert.ok(!today.includes('<div class="heading-actions">'),'the heading carries no action row');
   assert.ok(today.includes('Old partial report with explicit limits.'));
   assert.ok(today.includes('Sep 10, 2026'),'an old report keeps its actual date');
   assert.ok(today.includes('aria-label="Report date Sep 10, 2026'));
@@ -110,8 +346,9 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   assert.ok(t.get('#dialog-content').innerHTML.includes('No accounts have this result'));
   assert.ok(t.get('#dialog-content').innerHTML.includes('Full report'));
 
-  assert.ok(today.includes('Waiting'));
-  assert.ok(today.includes('Verification'));
+  assert.ok(today.includes('Waiting on assistant'));
+  assert.ok(today.includes('Not confirmed yet'));
+  assert.ok(today.includes('Accounts to finish'));
   assert.ok(today.includes('Done by you · verification pending'));
   assert.ok(today.includes('earlier attempt needs verification'),'an uncertain attempt stays verification work');
 
@@ -138,7 +375,7 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   assert.ok(setupView.includes('data-view="accounts"'));
   assert.ok(setupView.includes('Daily at 6 a.m. ' + new Intl.DateTimeFormat(undefined,{timeZone:'America/Los_Angeles',timeZoneName:'longGeneric'}).formatToParts(new Date()).find(part=>part.type==='timeZoneName').value));
   assert.ok(!setupView.includes('setup-progress'));
-  assert.match(setupView, /<button class="button primary" type="submit">Save personal brand<\/button>/, 'blocked accounts leave the brand save control enabled');
+  assert.match(setupView, /<button id="brand-save" class="button primary" type="submit">Save personal brand<\/button>/, 'blocked accounts leave the brand save control enabled');
   assert.ok(t.ui.renderDraft().includes('COMPOSE'));
   assert.ok(!t.ui.renderDraft().includes('DRAFT STUDIO'));
 
@@ -164,13 +401,12 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   assert.ok(!accountRefresh.get('#account-results').innerHTML.includes('exact-linked'),'the active search still controls refreshed results');
 
   const mailRefresh = setup();
-  mailRefresh.get('#today-mail-count').innerHTML = '4';
   mailRefresh.get('#today-mail-content').innerHTML = 'old mail';
   const changedMail = structuredClone(mailRefresh.data);
   changedMail.communication.messages.push({...changedMail.communication.messages[0],id:'m4',provider_id:'p4',subject:'Fifth saved message'});
   mailRefresh.setHandler(()=>response(changedMail));
   await mailRefresh.ui.refreshMonitoring();
-  assert.equal(mailRefresh.get('#today-mail-count').innerHTML,'5','Today mail count refreshes with its preview list');
+  assert.ok(mailRefresh.get('#today-mail-content').innerHTML.includes('aria-label="Open saved mail: 5"'),'Today mail count refreshes with its preview list');
   assert.ok(mailRefresh.get('#today-mail-content').innerHTML.includes('Fifth saved message'));
 
   const sourceRefresh = setup();
@@ -268,9 +504,11 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   assert.ok(doneCard.includes('Handled &lt;i&gt;locally&lt;/i&gt;') && !doneCard.includes('data-action="inbox-update"'),'a done request has no controls');
   assert.ok(doneCard.includes('Resonance published nothing'));
   t.ui.state.data.request_inbox = [];
-  assert.ok(t.ui.todayRequests().includes('Ask your assistant to look for comments'));
+  assert.equal(t.ui.todayRequests(),'','an empty inbox draws no panel');
   delete t.ui.state.data.request_inbox;
-  assert.ok(t.ui.todayRequests().includes('No open RES requests saved'),'an older state without the inbox still renders');
+  assert.equal(t.ui.todayRequests(),'','an older state without the inbox still renders and draws no panel');
+  t.ui.aboutDialog();
+  assert.ok(t.get('#dialog-content').innerHTML.includes('Resonance cannot watch for them'),'the RES request explanation moved to What Resonance can see');
 
   const inboxActions = setup();
   inboxActions.setHandler((url,options)=>url === '/api/state' ? response(inboxActions.data) : response({request:{}}));
@@ -300,16 +538,93 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   await inboxRefresh.ui.refreshMonitoring();
   assert.ok(inboxRefresh.get('#today-requests-content').innerHTML.includes('a newly imported request'),'a new import refreshes the Today inbox');
 
+  // One paste route: with no saved account every paste control opens the text-first walk; with accounts it keeps the excerpt form.
+  const noAccounts = setup();
+  noAccounts.ui.state.data = {settings:{theme:'dark'},accounts:[],reviews:[],source_items:[],action_requests:[],communication:{messages:[]},monitoring:{runs:[]}};
+  noAccounts.ui.state.view = 'review';
+  const postsEmpty = noAccounts.ui.renderReview();
+  assert.ok(postsEmpty.includes('data-action="add-excerpt"') && postsEmpty.includes('Paste my first post') && !postsEmpty.includes('An account comes first'),'Posts offers the text-first paste when nothing is saved');
+  await noAccounts.ui.handleAction({dataset:{action:'add-excerpt'}});
+  assert.ok(noAccounts.get('#dialog-content').innerHTML.includes('id="walk-post-text"'),'the text box is the first thing seen');
+  assert.ok(!noAccounts.get('#dialog-content').innerHTML.includes('Bring in my accounts') && !noAccounts.get('#dialog-content').innerHTML.includes('walk-platform'),'no account is requested before the text box');
+  assert.ok(noAccounts.get('#dialog-content').innerHTML.includes('Paste my first post') && noAccounts.get('#dialog-content').innerHTML.includes('Step 1 of 2'),'the existing two-step walk is used');
+  await t.ui.handleAction({dataset:{action:'add-excerpt'}});
+  assert.ok(t.get('#dialog-content').innerHTML.includes('excerpt-form') && !t.get('#dialog-content').innerHTML.includes('walk-post-text'),'with saved accounts the existing excerpt form opens');
+  assert.ok(t.get('#dialog-content').innerHTML.includes('>Paste a post<'),'the excerpt form uses the same label');
+
+  // A panel is absent when empty and appears on refresh without touching a focused region.
+  const appear = setup();
+  const full = structuredClone(appear.data);
+  Object.assign(appear.ui.state.data,{source_items:[],action_requests:[],attestations:[],request_inbox:[]});
+  appear.ui.state.data.communication.messages = [];
+  appear.ui.state.sourceSignature = appear.ui.sourceStateSignature();
+  appear.ui.state.communicationSignature = appear.ui.communicationSignature();
+  assert.equal(appear.ui.todayNeedsYou() + appear.ui.todayWaiting() + appear.ui.todayRequests() + appear.ui.todayMail(),'','empty panels render no chrome at all');
+  assert.ok(appear.ui.todaySummary().includes('Nothing saved yet. Paste a post to get a first check.') && appear.ui.todaySummary().includes('<strong>0</strong>'),'counts still show zeros');
+  for (const id of ['needs-you','waiting','requests','mail']) appear.get(`#today-${id}-content`).innerHTML = '';
+  const appearingFocus = element();
+  appear.document.activeElement = appearingFocus;
+  appear.get('#today-needs-you-content').contains = node => node === appearingFocus;
+  appear.setHandler(()=>response(full));
+  await appear.ui.refreshMonitoring();
+  assert.equal(appear.get('#today-needs-you-content').innerHTML,'','a focused region is not replaced');
+  assert.equal(appear.ui.state.sourceRefreshPending,true,'the update waits for focus to leave');
+  appear.document.activeElement = null;
+  appear.ui.updateSourceView();
+  assert.ok(appear.get('#today-needs-you-content').innerHTML.includes('id="today-needs-you"'),'the first needs-you item makes its panel appear');
+  assert.ok(appear.get('#today-waiting-content').innerHTML.includes('id="today-waiting"') && appear.get('#today-waiting-content').innerHTML.includes('id="today-verification"'));
+  assert.ok(appear.get('#today-requests-content').innerHTML.includes('id="today-requests"'));
+  assert.ok(appear.get('#today-kept-content').innerHTML.includes('kept post'));
+  appear.ui.updateCommunicationView();
+  assert.ok(appear.get('#today-mail-content').innerHTML.includes('id="today-mail"'),'the first saved mail makes its panel appear');
+
+  // Accounts to finish: never-checked alone is not unfinished work; unset boundaries and real problems are.
+  const finish = setup();
+  const named = {id:'n1',platform:'LinkedIn',handle:'only-saved',display_name:'Only saved',identity_mode:'named',daring:'careful',sfw_only:true};
+  Object.assign(finish.ui.state.data,{accounts:[named]});
+  finish.ui.state.data.communication.access = [];
+  assert.equal(finish.ui.todayAccountAttention(),'','a pasted, never-checked account is not Accounts to finish');
+  finish.ui.state.data.accounts = [{...named,identity_mode:'unclassified'}];
+  assert.ok(finish.ui.todayAccountAttention().includes('Boundaries not set'),'unknown boundaries stay visible');
+  finish.ui.state.data.accounts = [named];
+  finish.ui.state.data.communication.access = [{account_id:'n1',status:'needs_login',method:'browser',checked_at:new Date().toISOString(),detail:'Sign in.',capabilities:[]}];
+  assert.ok(finish.ui.todayAccountAttention().includes('Sign-in needed'));
+  finish.ui.state.data.communication.access = [{account_id:'n1',status:'verified',method:'browser',checked_at:new Date(Date.now()-90000000).toISOString(),detail:'Old.',capabilities:[]}];
+  assert.ok(finish.ui.todayAccountAttention().includes('Recheck due'),'recheck due remains visible');
+  finish.ui.state.data.communication.access = [{account_id:'n1',status:'blocked',method:'browser',checked_at:new Date().toISOString(),detail:'Blocked.',capabilities:[]}];
+  assert.ok(finish.ui.todayAccountAttention().includes('Blocked'));
+
+  // When the last card leaves a panel the redraw puts focus on the status sentence, not the document.
+  const refocus = setup();
+  const card = element();
+  let redrawn = false;
+  refocus.get('#main').contains = node => node === card && !redrawn;
+  Object.defineProperty(refocus.get('#main'),'innerHTML',{get:() => '',set:() => {redrawn = true;}});
+  refocus.document.activeElement = card;
+  refocus.ui.render();
+  assert.equal(refocus.get('#today-status').focused,true,'focus lands on the status sentence');
+
+  // Navigation: Today, Posts and Compose lead; the rest stay visible and quieter, in DOM order after the primary tier.
+  const markup = fs.readFileSync(path.join(__dirname,'../static/index.html'),'utf8');
+  const mainNav = markup.indexOf('<nav class="primary-nav" aria-label="Main">'), moreNav = markup.indexOf('<nav class="secondary-nav" aria-label="More">');
+  assert.ok(markup.indexOf('class="skip-link"') < mainNav && mainNav > 0 && mainNav < moreNav && moreNav < markup.indexOf('id="main"'),'skip link, then primary, then quiet row, then the page');
+  const primaryTier = markup.slice(mainNav,moreNav), quietTier = markup.slice(moreNav,markup.indexOf('</nav>',moreNav));
+  for (const key of ['overview','review','draft']) assert.ok(primaryTier.includes(`data-nav="${key}"`) && primaryTier.includes(`href="#${key}"`),`${key} is a primary tab`);
+  for (const key of ['accounts','mail','monitoring']) assert.ok(quietTier.includes(`data-nav="${key}"`) && quietTier.includes(`href="#${key}"`),`${key} stays in the quiet row`);
+  assert.ok(quietTier.includes('data-action="settings"') && quietTier.includes('Settings &amp; data'),'Settings & data stays a button in the quiet row');
+  t.ui.renderNav();
+  assert.ok(t.nav.find(item=>item.dataset.nav === 'monitoring').innerHTML.includes('Check history'));
+
   const workerEvents={},removed=[];
   let activation;
   const workerContext={self:{addEventListener(name,handler){workerEvents[name]=handler;},clients:{claim:async()=>{}}},
-    caches:{keys:async()=>['social-brief-shell-v12','resonance-shell-v15','resonance-shell-v16','resonance-shell-v18','resonance-shell-v19','resonance-shell-v20','resonance-shell-v21','resonance-shell-v22','resonance-shell-v23','resonance-shell-v25','unrelated-cache'],
+    caches:{keys:async()=>['social-brief-shell-v12','resonance-shell-v15','resonance-shell-v16','resonance-shell-v18','resonance-shell-v19','resonance-shell-v20','resonance-shell-v21','resonance-shell-v22','resonance-shell-v23','resonance-shell-v25','resonance-shell-v26','resonance-shell-v28','resonance-shell-v29','resonance-shell-v30','resonance-shell-v31','unrelated-cache'],
       delete:async key=>{removed.push(key);return true;}}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../static/sw.js'),'utf8'),workerContext);
   workerEvents.activate({waitUntil(promise){activation=promise;}});
   await activation;
-  assert.deepEqual(removed.sort(),['resonance-shell-v15','resonance-shell-v16','resonance-shell-v18','resonance-shell-v19','resonance-shell-v20','resonance-shell-v21','resonance-shell-v22','resonance-shell-v23','social-brief-shell-v12']);
-  assert.ok(fs.readFileSync(path.join(__dirname,'../static/sw.js'),'utf8').includes("'resonance-shell-v25'"),'the shell cache version was bumped for the account finder');
+  assert.deepEqual(removed.sort(),['resonance-shell-v15','resonance-shell-v16','resonance-shell-v18','resonance-shell-v19','resonance-shell-v20','resonance-shell-v21','resonance-shell-v22','resonance-shell-v23','resonance-shell-v25','resonance-shell-v26','resonance-shell-v28','resonance-shell-v29','resonance-shell-v30','resonance-shell-v31','social-brief-shell-v12']);
+  assert.ok(fs.readFileSync(path.join(__dirname,'../static/sw.js'),'utf8').includes("'resonance-shell-v33'"),'the shell cache version includes the in-app manual link');
   assert.ok(fs.readFileSync(path.join(__dirname,'../static/sw.js'),'utf8').includes("'/reader-client.js', '/account-discovery.js', '/app.js'"),'the shell cache lists the reader client and account finder before the app');
   const shell=fs.readFileSync(path.join(__dirname,'../static/index.html'),'utf8');
   assert.ok(shell.indexOf('/reader-client.js') > 0 && shell.indexOf('/reader-client.js') < shell.indexOf('/app.js'),'the reader client loads before the app');

@@ -28,7 +28,7 @@ In the same project chat, ask **“Start the local RES server from this folder a
 
 ## Triage notifications
 
-Social inbox is included in the next desktop release. The account and notifications pictured here are fictional.
+The source edition and Windows desktop app include Social inbox. The account and notifications pictured here are fictional.
 
 1. Open **Today → Social inbox**, choose **Triage recent notifications** and select one saved social account. Choose **Open workspace**.
 

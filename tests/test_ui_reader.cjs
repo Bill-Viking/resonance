@@ -321,9 +321,134 @@ test('detection: absent, offline and wrong page are different states', () => {
   assert.equal(h.client.setup.status, 'absent');
   h.emit('ready', {protocol: 1});
   assert.equal(h.client.setup.status, 'connected');
+  // Genuinely missing, blocked or incompatible readers are still refused before anything is armed.
+  for (const status of ['absent', 'blocked', 'mismatch', 'checking', 'connected']) {
+    h.client.setup.status = status;
+    const refused = h.client.start(['ax']);
+    assert.equal(refused.ok, false, status);
+    assert.equal(h.events('arm').length, 0, status);
+  }
   h.emit('disconnected', {reason: 'transport_disconnected', batchId: null});
   assert.equal(h.client.setup.status, 'offline');
-  assert.equal(h.client.start(['ax']).ok, false);
+});
+
+// A disconnected worker: the fresh trusted click re-arms it, but nothing is reserved on the server
+// until a fresh installed setup answer arrives with the provider grants still in place.
+function offline(h, detail) {
+  h.setupReady(detail);
+  h.emit('disconnected', {reason: 'transport_disconnected', batchId: null});
+  assert.equal(h.client.setup.status, 'offline');
+}
+
+test('a fresh click after a disconnect arms at once but reserves nothing until a fresh installed setup', async () => {
+  const h = harness();
+  offline(h);
+  const outcome = h.client.start(['ax', 'ay']);
+  assert.equal(outcome.ok, true);
+  assert.equal(h.events('arm').length, 1, 'armed inside the click');
+  assert.equal(h.client.check.phase, 'reconnecting');
+  assert.equal(h.client.busy(), true);
+  await flush();
+  assert.equal(h.calls('/api/checks/begin').length, 0, 'no server work from stale setup');
+  assert.equal(h.events('start').length, 0);
+  h.emit('ready', {protocol: 1});
+  await flush();
+  assert.equal(h.calls('/api/checks/begin').length, 0, 'ready alone is not a setup answer');
+  h.setupReady();
+  assert.equal(h.client.check.phase, 'beginning');
+  await flush();
+  assert.equal(h.calls('/api/checks/begin').length, 1);
+  assert.equal(h.client.check.phase, 'reading');
+  assert.equal(h.events('start').length, 1);
+  assert.equal(h.client.setup.status, 'installed');
+  assert.equal(h.events('cancel').length, 0);
+});
+
+test('a duplicate click while reconnecting is refused and arms nothing more', async () => {
+  const h = harness();
+  offline(h);
+  assert.equal(h.client.start(['ax']).ok, true);
+  const again = h.client.start(['ax']);
+  assert.equal(again.ok, false);
+  assert.match(again.message, /already in progress/);
+  assert.equal(h.events('arm').length, 1);
+  h.setupReady();
+  await flush();
+  assert.equal(h.calls('/api/checks/begin').length, 1);
+});
+
+test('a reader that never answers after the click is discarded with no server work', async () => {
+  const h = harness();
+  offline(h);
+  assert.equal(h.client.start(['ax']).ok, true);
+  const batchId = h.batchId();
+  [...h.timers.values()].find(timer => timer.ms === 1500).fn();
+  assert.equal(h.client.check.phase, 'failed');
+  assert.match(h.client.check.message, /did not answer.*nothing was read/);
+  assert.equal(h.client.setup.status, 'absent');
+  assert.deepEqual(h.events('cancel').map(event => event.detail), [{batchId}], 'the bridge plan is cancelled');
+  await flush();
+  assert.equal(h.calls('/api/checks/begin').length, 0);
+  assert.equal(h.calls('/api/checks/cancel').length, 0, 'nothing was reserved, so nothing to cancel');
+  h.setupReady(); // a late answer after the discard changes nothing
+  await flush();
+  assert.equal(h.calls('/api/checks/begin').length, 0);
+});
+
+test('a permission that is missing on the fresh setup stops the check before the server is asked', async () => {
+  const h = harness();
+  offline(h);
+  assert.equal(h.client.start(['ax', 'ay']).ok, true);
+  h.setupReady({youtube: false});
+  assert.equal(h.client.check.phase, 'failed');
+  assert.match(h.client.check.message, /permission/);
+  assert.equal(h.events('cancel').length, 1);
+  await flush();
+  assert.equal(h.calls('/api/checks/begin').length, 0);
+  assert.ok(h.client.check.entries.every(entry => entry.result === null));
+  // Stale grants from before the drop do not matter: only the fresh answer counts.
+  const h2 = harness();
+  offline(h2, {youtube: false});
+  assert.equal(h2.client.start(['ax']).ok, true, 'an unrelated stale denial does not block the plan');
+  h2.setupReady();
+  await flush();
+  assert.equal(h2.calls('/api/checks/begin').length, 1);
+});
+
+test('an incompatible or invalid fresh setup after the click discards the check', async () => {
+  for (const reply of [{version: '9.9.9'}, {protocol: 2}]) {
+    const h = harness();
+    offline(h);
+    assert.equal(h.client.start(['ax']).ok, true);
+    h.setupReady(reply);
+    assert.equal(h.client.check.phase, 'failed');
+    assert.notEqual(h.client.setup.status, 'installed');
+    await flush();
+    assert.equal(h.calls('/api/checks/begin').length, 0);
+    assert.equal(h.events('cancel').length, 1);
+  }
+});
+
+test('a disconnect or a refused gesture while reconnecting never begins a check', async () => {
+  const h = harness();
+  offline(h);
+  assert.equal(h.client.start(['ax']).ok, true);
+  h.emit('disconnected', {reason: 'transport_disconnected', batchId: h.batchId()});
+  assert.equal(h.client.check.phase, 'failed');
+  h.setupReady();
+  await flush();
+  assert.equal(h.calls('/api/checks/begin').length, 0);
+  // An expired or missing gesture is refused by the bridge during the arm itself.
+  const g = harness({});
+  offline(g);
+  Object.defineProperty(g, 'autoArm', {get() { g.emit('rejected', {batchId: g.arm().batchId, reason: 'gesture_required'}); return false; }});
+  const outcome = g.client.start(['ax']);
+  assert.equal(outcome.ok, false);
+  assert.match(outcome.message, /Check button/);
+  assert.equal(g.client.check, null);
+  g.setupReady();
+  await flush();
+  assert.equal(g.calls('/api/checks/begin').length, 0);
 });
 
 test('unsupported-only and unidentifiable selections never reach the reader', async () => {
@@ -508,6 +633,7 @@ function element() {
     dispatchEvent(event) { for (const fn of listeners.get(event.type) || []) fn(event); },
     classList: {add() {}, remove() {}}, querySelector() { return null; }, querySelectorAll() { return []; }, childNodes: [],
     focus() { this.focused = true; }, select() {}, scrollIntoView() {}, setAttribute() {}, removeAttribute() {}, contains(node) { return node === this; },
+    children: [], appendChild(node) { this.children.push(node); }, remove() { this.removed = true; },
     replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; }};
 }
 function pageFixture(overrides = {}) {
@@ -552,7 +678,7 @@ function pageFixture(overrides = {}) {
   // Include the real event wiring; omit only page startup/polling.
   const cutoff = appSource.indexOf('  if (readerClient) {readerClient.subscribe(renderReaderPanels);');
   assert.ok(cutoff > 0);
-  vm.runInContext(appSource.slice(0, cutoff) + '\n globalThis.ui={state,renderOverview,renderWelcome,handleAction,saveForm,readerClient,readerTodayContent,readerAccountBlock,readerReceiptHtml,readerSetupDialog,readerSetupLive,readerSetupState,readerCheckProgress,discovery,discoveryHtml,discoveryDialogClosed,resetWorkspaceEditors,importFile,renderReaderPanels,cancelFirstPost,getWalk:() => accountWalk};\n})();', context);
+  vm.runInContext(appSource.slice(0, cutoff) + '\n globalThis.ui={state,renderOverview,renderWelcome,handleAction,saveForm,readerClient,readerTodayContent,readerAccountBlock,readerReceiptHtml,readerSetupDialog,readerSetupLive,readerSetupState,readerCheckProgress,discovery,discoveryHtml,discoveryDialogClosed,resetWorkspaceEditors,importFile,renderReaderPanels,cancelFirstPost,getWalk:() => accountWalk,getDiscardAsk:() => discardAsk};\n})();', context);
   context.ui.state.data = structuredClone(data);
   context.ui.state.connected = true;
   context.ui.state.view = 'accounts';
@@ -567,7 +693,7 @@ function pageFixture(overrides = {}) {
 const respond = body => ({ok: true, status: 200, json: async () => structuredClone(body)});
 const failure = (status, error) => ({ok: false, status, json: async () => ({error})});
 
-test('Today leads with Check now once, with a latest saved receipt, and disables it for samples', () => {
+test('Today keeps one Check now with a latest saved receipt, while sample data and a missing helper offer none', () => {
   const summary = {count: 1, source_count: 4, revision_count: 4, limit: 20, recent: [{id: hex('4'), origin: 'live', completed_at: '2026-11-01T10:00:05Z', reader_version: '0.1.0', totals: {accounts: 2, ok: 1, held: 0, error: 0, unsupported: 1, sources: 3, findings: 1}, accounts: []}]};
   const page = pageFixture({summary});
   const today = page.ui.readerTodayContent();
@@ -575,13 +701,19 @@ test('Today leads with Check now once, with a latest saved receipt, and disables
   assert.ok(today.includes('Set up account checks'));
   assert.ok(today.includes('LATEST SAVED CHECK'));
   assert.ok(today.includes('data-action="reader-receipt" data-id="' + hex('4') + '"'));
-  assert.ok(today.includes('Paste text') && today.includes('Ask my assistant'));
+  assert.ok(today.includes('Paste a post') && today.includes('Ask my assistant') && !today.includes('Paste text'));
+  assert.equal((today.match(/class="button primary"/g) || []).length, 1, 'exactly one primary while the reader is still being looked for');
+  assert.match(today, /id="res-check-now" class="button primary" data-action="reader-check-all" disabled/, 'a first look keeps a workspace that has a saved browser check on Check now, disabled');
   assert.ok(!/safe|score/i.test(today.replace(/A check with no rule matches does not mean an account is safe\./, '')), 'no safety claim or score');
   assert.ok(!/id="res-check-cancel"/.test(today), 'no Cancel when nothing is running');
   page.ui.state.data.workspace.mode = 'samples';
-  assert.match(page.ui.readerTodayContent(), /id="res-check-now" class="button primary" data-action="reader-check-all" disabled/);
+  const sampleToday = page.ui.readerTodayContent();
+  assert.ok(!sampleToday.includes('res-check-now') && !sampleToday.includes('reader-check-all'), 'samples never offer a real read');
+  assert.ok(sampleToday.includes('Sample data is never read from a real account') && sampleToday.includes('practices in the sample workspace only'), 'the refusal is explained');
+  assert.equal((sampleToday.match(/class="button primary"/g) || []).length, 1);
+  assert.equal((sampleToday.match(/data-action="add-excerpt"/g) || []).length, 1);
   const bare = pageFixture({noReader: true});
-  assert.match(bare.ui.readerTodayContent(), /reader-check-all" disabled/);
+  assert.ok(!bare.ui.readerTodayContent().includes('res-check-now'), 'no dead Check now without the reader helper');
   assert.ok(bare.ui.readerTodayContent().includes('Reader helper not loaded'));
 });
 
@@ -621,7 +753,7 @@ test('setup states: absent explains the preview without inventing a link; instal
   const page = pageFixture();
   page.ui.readerSetupDialog();
   const html = page.dialog();
-  for (const phrase of ['not in a browser store yet', 'same browser', 'whole site', 'at most the 3 newest', 'images, video', 'separate visible browser window', 'never posts, edits, deletes']) assert.ok(html.includes(phrase), phrase);
+  for (const phrase of ['not in a browser store yet', 'same browser', 'whole site', 'up to three recent own posts', 'not replies to other people', 'English-language interface', 'watch history', 'images, video', 'separate visible browser window', 'never publishes, edits or deletes']) assert.ok(html.includes(phrase), phrase);
   assert.ok(!/developer mode|unpacked|chrome:\/\/extensions|https?:\/\/(chrome\.google|chromewebstore|microsoftedge)/i.test(html), 'no developer-mode instruction and no invented store link');
   assert.ok(html.includes('Looking for the browser reader'), 'the first look is read-only detection');
   page.fire(1500);
@@ -630,7 +762,7 @@ test('setup states: absent explains the preview without inventing a link; instal
   assert.ok(live.includes('data-action="add-excerpt"') && live.includes('data-action="connect-assistant"') && live.includes('data-action="add-account"'));
   assert.ok(!live.includes('res-reader-options'), 'nothing to open when the reader is absent');
   page.ui.state.data.accounts = [];
-  assert.ok(page.ui.readerSetupLive().includes('data-action="welcome-paste"') && page.ui.readerSetupLive().includes('Paste my first post'));
+  assert.ok(page.ui.readerSetupLive().includes('data-action="add-excerpt"') && page.ui.readerSetupLive().includes('Paste my first post'), 'every paste control uses one route and one label');
   page.ui.state.data.accounts = structuredClone(page.data.accounts);
   page.ui.readerClient.handle('setup', {version: '0.1.0', protocol: 1, x: false, youtube: null});
   live = page.ui.readerSetupLive();
@@ -653,7 +785,7 @@ test('welcome offers the three doors and Paste my first post keeps its route thr
   page.ui.state.data.accounts = [];
   const welcome = page.ui.renderWelcome();
   for (const door of ['Set up account checks', 'Paste my first post', 'Try samples']) assert.ok(welcome.includes(door), door);
-  assert.ok(welcome.indexOf('Set up account checks') < welcome.indexOf('Paste my first post') && welcome.indexOf('Paste my first post') < welcome.indexOf('Try samples'));
+  assert.ok(welcome.indexOf('Paste my first post') < welcome.indexOf('Try samples') && welcome.indexOf('Try samples') < welcome.indexOf('Set up account checks'));
   await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
   assert.ok(page.dialog().includes('Check wording without an account'), 'the no-account route stays available');
   assert.ok(page.dialog().includes('Step 1 of 2') && !page.dialog().includes('Bring in my accounts'), 'the first-post route is its own two-step form');
@@ -878,7 +1010,7 @@ const toastText = page => page.get('#toast').textContent;
 
 test('Paste my first post is described as pasting writing and then choosing its account', () => {
   const welcome = firstPostPage().ui.renderWelcome();
-  assert.ok(welcome.includes('Paste your writing, then choose its account.') && !welcome.includes('Save an account, then check something you wrote.'));
+  assert.ok(welcome.includes('Two steps: your text and account, then how you want to show up.') && !welcome.includes('Save an account, then check something you wrote.'));
 });
 
 test('closing or cancelling while the account is saving stops the post and warns that the save may complete', async () => {
@@ -1087,6 +1219,8 @@ test('a delayed close event cannot cancel a reopened first-post dialog', async (
   const page = firstPostPage();
   await startedWalk(page);
   await page.ui.handleAction({dataset: {action: 'close-dialog'}});
+  assert.ok(page.ui.getWalk(), 'typed writing asks before it is discarded');
+  await page.ui.handleAction({dataset: {action: 'discard-writing'}});
   assert.equal(page.ui.getWalk(), null);
   await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
   const fresh = page.ui.getWalk();
@@ -1095,8 +1229,157 @@ test('a delayed close event cannot cancel a reopened first-post dialog', async (
   assert.equal(page.ui.getWalk(), fresh, 'the previous dialog close must not touch this walk');
   await page.ui.saveForm(postForm({text: 'A new draft', platform: 'X', identity: '@river_example'}));
   assert.equal(fresh.step, 'boundaries');
-  page.get('#dialog').dispatchEvent({type: 'cancel'});
-  assert.equal(page.ui.getWalk(), null, 'the real current cancel listener still clears the walk');
+  page.get('#dialog').dispatchEvent({type: 'cancel', preventDefault() {}});
+  await page.ui.handleAction({dataset: {action: 'discard-writing'}});
+  assert.equal(page.ui.getWalk(), null, 'a confirmed discard still clears the walk');
+});
+
+// ---- dismissing a dialog never silently loses writing ----------------------------------------------
+const typed = value => ({type: 'text', tagName: 'TEXTAREA', value, defaultValue: ''});
+const withBackdrop = page => {
+  const dialog = page.get('#dialog');
+  dialog.getBoundingClientRect = () => ({left: 100, right: 500, top: 100, bottom: 400});
+  return dialog;
+};
+const press = (dialog, target, x, y) => dialog.dispatchEvent({type: 'mousedown', target, clientX: x, clientY: y});
+const release = (dialog, target, x, y) => dialog.dispatchEvent({type: 'click', target, clientX: x, clientY: y});
+const escape = (dialog, type = 'keydown') => {
+  const event = {type, key: 'Escape', prevented: false, preventDefault() { this.prevented = true; }};
+  dialog.dispatchEvent(event);
+  return event;
+};
+
+test('a press that starts in the form and ends outside the dialog does not close it', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  const dialog = withBackdrop(page);
+  dialog.querySelectorAll = () => [typed('Words I just pasted')];
+  press(dialog, {inForm: true}, 200, 200);
+  release(dialog, dialog, 50, 50); // the browser reports the common ancestor, the dialog itself
+  assert.equal(dialog.open, true);
+  assert.equal(page.ui.getDiscardAsk(), null, 'no prompt and nothing closed');
+  assert.ok(page.ui.getWalk());
+  press(dialog, dialog, 50, 50);
+  release(dialog, {inside: true}, 200, 200); // started on the backdrop, ended inside: also not a dismissal
+  assert.equal(dialog.open, true);
+  assert.equal(page.ui.getDiscardAsk(), null);
+});
+
+test('a genuine backdrop click or Escape on a dirty dialog asks, and keeping the writing leaves everything in place', async () => {
+  const page = firstPostPage();
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  const dialog = withBackdrop(page);
+  const field = typed('Words I just pasted');
+  dialog.querySelectorAll = () => [field];
+  const content = page.get('#dialog-content');
+  const before = content.innerHTML;
+  press(dialog, dialog, 50, 50);
+  release(dialog, dialog, 50, 50);
+  assert.equal(dialog.open, true, 'the dialog stays open');
+  assert.ok(page.ui.getDiscardAsk(), 'the same confirmation is shown');
+  assert.equal(content.innerHTML, before, 'the form markup is untouched while the confirmation shows');
+  assert.ok(content.children.length === 1 && content.children[0].innerHTML.includes('Discard what you wrote?') && content.children[0].innerHTML.includes('Keep writing'));
+  assert.equal(field.value, 'Words I just pasted', 'the field keeps its value');
+  // Escape while asking keeps the writing.
+  assert.equal(escape(dialog).prevented, true);
+  assert.equal(page.ui.getDiscardAsk(), null);
+  assert.equal(content.children[0].removed, true);
+  assert.equal(dialog.open, true);
+  // Escape on a dirty dialog asks; a cancel event while asking never closes it; Keep writing restores it.
+  assert.equal(escape(dialog).prevented, true);
+  assert.ok(page.ui.getDiscardAsk());
+  assert.equal(escape(dialog, 'cancel').prevented, true);
+  assert.equal(dialog.open, true);
+  await page.ui.handleAction({dataset: {action: 'keep-writing'}});
+  assert.equal(page.ui.getDiscardAsk(), null);
+  assert.equal(dialog.open, true);
+  assert.ok(page.ui.getWalk(), 'the first-post walk is still there');
+  assert.equal(field.value, 'Words I just pasted');
+  // Cancel asks too; the header close while asking keeps the writing.
+  await page.ui.handleAction({dataset: {action: 'close-dialog'}});
+  assert.ok(page.ui.getDiscardAsk());
+  await page.ui.handleAction({dataset: {action: 'close-dialog'}});
+  assert.equal(page.ui.getDiscardAsk(), null);
+  assert.equal(dialog.open, true);
+  // Only the explicit discard closes it, and it ends the first-post walk as before.
+  await page.ui.handleAction({dataset: {action: 'close-dialog'}});
+  await page.ui.handleAction({dataset: {action: 'discard-writing'}});
+  assert.equal(dialog.open, false);
+  assert.equal(page.ui.getWalk(), null);
+  assert.equal(page.ui.getDiscardAsk(), null);
+});
+
+test('a clean dialog closes normally by backdrop, Escape and Close', async () => {
+  const page = pageFixture();
+  const dialog = withBackdrop(page);
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  press(dialog, dialog, 50, 50);
+  release(dialog, dialog, 50, 50);
+  assert.equal(dialog.open, false);
+  assert.equal(page.ui.getDiscardAsk(), null);
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  assert.equal(dialog.open, true);
+  assert.equal(escape(dialog).prevented, false, 'Escape on an unchanged dialog is left to the browser');
+  assert.equal(escape(dialog, 'cancel').prevented, false);
+  await page.ui.handleAction({dataset: {action: 'close-dialog'}});
+  assert.equal(dialog.open, false);
+  // Fields that are back at their saved values are clean.
+  await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
+  dialog.querySelectorAll = () => [{type: 'text', tagName: 'INPUT', value: 'same', defaultValue: 'same'},
+    {type: 'checkbox', tagName: 'INPUT', checked: true, defaultChecked: true},
+    {tagName: 'SELECT', multiple: false, selectedIndex: 0, options: [{defaultSelected: false}, {defaultSelected: false}]}];
+  await page.ui.handleAction({dataset: {action: 'close-dialog'}});
+  assert.equal(dialog.open, false);
+});
+
+test('Back out of the typed identity step asks before dropping what was typed', async () => {
+  const page = pageFixture();
+  const dialog = withBackdrop(page);
+  await page.ui.handleAction({dataset: {action: 'add-account'}});
+  await page.ui.handleAction({dataset: {action: 'walk-platform', platform: 'X'}});
+  assert.ok(page.dialog().includes('walk-identity-form'));
+  await page.ui.handleAction({dataset: {action: 'walk-back', step: 'platform'}});
+  assert.ok(page.dialog().includes('Pick the platform'), 'an empty identity step goes back at once');
+  await page.ui.handleAction({dataset: {action: 'walk-platform', platform: 'X'}});
+  dialog.querySelectorAll = () => [{type: 'text', tagName: 'INPUT', value: '@river_example', defaultValue: ''}];
+  await page.ui.handleAction({dataset: {action: 'walk-back', step: 'platform'}});
+  assert.ok(page.ui.getDiscardAsk());
+  assert.ok(page.dialog().includes('walk-identity-form'), 'the typed form is still the content');
+  await page.ui.handleAction({dataset: {action: 'keep-writing'}});
+  assert.equal(page.ui.getDiscardAsk(), null);
+  await page.ui.handleAction({dataset: {action: 'walk-back', step: 'platform'}});
+  await page.ui.handleAction({dataset: {action: 'discard-writing'}});
+  assert.ok(page.dialog().includes('Pick the platform'));
+  assert.equal(page.ui.getDiscardAsk(), null);
+});
+
+test('a save in flight or an unconfirmed response closes under its own rules, and a successful save never asks', async () => {
+  const page = firstPostPage();
+  await startedWalk(page);
+  const hold = gate();
+  page.setHandler(async url => { if (url === '/api/accounts') { await hold.promise; return respond({account: savedX}); } return respond({...page.data, accounts: [savedX]}); });
+  const pending = page.ui.saveForm(named);
+  const dialog = withBackdrop(page);
+  escape(dialog, 'cancel');
+  assert.equal(page.ui.getDiscardAsk(), null, 'no prompt while the save is in flight');
+  assert.equal(page.ui.getWalk(), null);
+  hold.release();
+  await pending;
+  const lost = firstPostPage();
+  await startedWalk(lost);
+  lost.setHandler(async url => { if (url === '/api/accounts') throw new Error('network'); return respond({...lost.data}); });
+  await lost.ui.saveForm(named);
+  assert.equal(lost.ui.getWalk().uncertain, 'account');
+  await lost.ui.handleAction({dataset: {action: 'close-dialog'}});
+  assert.equal(lost.ui.getDiscardAsk(), null, 'an unconfirmed attempt is not asked about');
+  assert.equal(lost.get('#dialog').open, false);
+  assert.equal(lost.ui.getWalk(), null);
+  const ok = firstPostPage();
+  await startedWalk(ok);
+  ok.setHandler(async url => url === '/api/accounts' ? respond({account: savedX}) : url === '/api/excerpts' ? respond({review: savedReview('Words that stay'), flag_count: 0}) : respond({...ok.data, accounts: [savedX], reviews: [savedReview('Words that stay')]}));
+  await ok.ui.saveForm(named);
+  assert.equal(ok.ui.getDiscardAsk(), null);
+  assert.equal(ok.get('#dialog').open, false);
 });
 
 test('a changed workspace token in the same mode stops the continuation before any post', async () => {
@@ -1114,39 +1397,68 @@ test('a changed workspace token in the same mode stops the continuation before a
   assert.equal(page.context.location.hash, '#overview');
 });
 
-test('with saved accounts Paste my first post is a plain Check a post form', async () => {
+test('with saved accounts the paste control opens the plain Paste a post form', async () => {
   const page = pageFixture();
   await page.ui.handleAction({dataset: {action: 'welcome-paste'}});
   const html = page.dialog();
-  assert.ok(html.includes('Check a post') && html.includes('>Your post<') && html.includes('excerpt-form') && !html.includes('walk-post-form'));
+  assert.ok(html.includes('Paste a post') && !html.includes('Check a post') && html.includes('>Your post<') && html.includes('excerpt-form') && !html.includes('walk-post-form'));
   assert.ok(html.includes('name="source_url"') && html.includes('name="title"') && html.includes('name="kind"'));
   page.setHandler(url => url === '/api/excerpts' ? respond({review: {id: 'rv1'}, flag_count: 0}) : respond({...page.data}));
   await page.ui.saveForm({values: {account_id: 'ax', kind: 'post', text: 'Exact text', source_url: '', title: ''}, reportValidity: () => true, getAttribute: () => 'excerpt-form', querySelector: () => null});
   assert.deepEqual(JSON.parse(page.calls.find(call => call.url === '/api/excerpts').body), {account_id: 'ax', kind: 'post', text: 'Exact text', source_url: '', title: ''});
 });
 
-test('Today puts Paste text first when the reader is absent, incompatible or missing, and keeps one Check now', () => {
+test('Reader readiness picks the lead: Check now only where it can start, otherwise Paste a post with the setup explanation', () => {
+  const primaries = html => (html.match(/class="button primary"/g) || []).length;
   const absent = pageFixture();
   absent.ui.readerSetupDialog();
   absent.fire(1500);
   const quiet = absent.ui.readerTodayContent();
-  assert.equal((quiet.match(/id="res-check-now"/g) || []).length, 1);
-  assert.match(quiet, /id="res-check-now" class="button quiet" data-action="reader-check-all" disabled/);
-  assert.ok(quiet.includes('Set up account checks') && quiet.includes('Account checks are not set up in this browser'));
-  assert.match(quiet, /class="button primary" data-action="add-excerpt">Paste text/);
-  assert.ok(quiet.indexOf('Paste text') < quiet.indexOf('id="res-check-now"'));
+  assert.ok(!quiet.includes('res-check-now') && !quiet.includes('reader-check-all'), 'no dead Check now when the reader is absent');
+  assert.equal(primaries(quiet), 1);
+  assert.match(quiet, /class="button primary" data-action="add-excerpt"[^>]*>(?:<svg[\s\S]*?<\/svg>)?Paste a post/);
+  assert.ok(quiet.includes('data-action="reader-setup"') && quiet.includes('Set up account checks') && quiet.includes('not ready here') && quiet.includes('Browser reader not found'), 'the setup link and the reason stay beside the paste button');
+  assert.equal((quiet.match(/data-action="add-excerpt"/g) || []).length, 1);
   const mismatch = pageFixture();
   mismatch.ui.readerClient.handle('setup', {version: '0.0.6', protocol: 1, x: true, youtube: true});
-  assert.match(mismatch.ui.readerTodayContent(), /id="res-check-now" class="button quiet" data-action="reader-check-all" disabled/);
+  assert.ok(!mismatch.ui.readerTodayContent().includes('res-check-now') && mismatch.ui.readerTodayContent().includes('Reader version does not match'));
   const bare = pageFixture({noReader: true});
-  assert.match(bare.ui.readerTodayContent(), /id="res-check-now" class="button quiet" data-action="reader-check-all" disabled/);
+  assert.ok(!bare.ui.readerTodayContent().includes('res-check-now'));
   const ready = pageFixture();
   ready.ui.readerClient.handle('setup', {version: '0.1.0', protocol: 1, x: true, youtube: true});
   const live = ready.ui.readerTodayContent();
+  assert.equal((live.match(/id="res-check-now"/g) || []).length, 1);
   assert.match(live, /id="res-check-now" class="button primary" data-action="reader-check-all" >/);
-  assert.match(live, /class="button quiet" data-action="add-excerpt">Paste text/);
+  assert.match(live, /class="button quiet" data-action="add-excerpt"[^>]*>(?:<svg[\s\S]*?<\/svg>)?Paste a post/);
+  assert.equal(primaries(live), 1, 'one primary when the reader is ready');
+  assert.ok(live.indexOf('id="res-check-now"') < live.indexOf('data-action="add-excerpt"'), 'Check now comes before the quiet paste');
+  assert.ok(live.includes('Will read:') && live.includes('main X timeline (not replies to other people)') && live.includes('Up to three recent own items'), 'the corrected scope wording stays beside the button');
+  assert.ok(!/newest items/i.test(live), 'the provisional newest-items wording is not restored');
+  ready.ui.readerClient.handle('disconnected', {reason: 'transport_disconnected', batchId: null});
+  const reconnect = ready.ui.readerTodayContent();
+  assert.match(reconnect, /id="res-check-now" class="button primary" data-action="reader-check-all" >/,
+    'a disconnected worker keeps the enabled trusted-click reconnect route');
+  assert.ok(reconnect.includes('Reader disconnected'), 'the offline state is still explained');
+  const onlyOther = pageFixture({accounts: [{id: 'li', platform: 'LinkedIn', handle: 'example-li', url: 'https://www.linkedin.com/in/example-li', identity_mode: 'named', daring: 'careful', sfw_only: true}]});
+  onlyOther.ui.readerClient.handle('setup', {version: '0.1.0', protocol: 1, x: true, youtube: true});
+  const noSupported = onlyOther.ui.readerTodayContent();
+  assert.ok(!noSupported.includes('res-check-now') && noSupported.includes('nothing to read automatically'), 'a ready reader with no X or YouTube account has nothing to start');
+  assert.equal(primaries(noSupported), 1);
   const looking = pageFixture();
-  assert.match(looking.ui.readerTodayContent(), /id="res-check-now" class="button primary" data-action="reader-check-all"/, 'a first look that has not finished does not demote the button');
+  const first = looking.ui.readerTodayContent();
+  assert.ok(!first.includes('res-check-now') && primaries(first) === 1, 'a first look without any saved browser check leads with paste');
+});
+
+test('running reader work keeps its own progress and Cancel visible ahead of the other actions', async () => {
+  const page = pageFixture();
+  page.ui.readerClient.handle('setup', {version: '0.1.0', protocol: 1, x: true, youtube: true});
+  page.setHandler((url, options) => url === '/api/checks/begin' ? respond(beginJob(page.data.accounts, JSON.parse(options.body))) : respond({}));
+  await page.ui.handleAction({dataset: {action: 'reader-check-all'}});
+  const running = page.ui.readerTodayContent();
+  assert.ok(running.includes('id="res-check-cancel"') && running.includes('reader-progress'), 'Cancel and progress stay in the lead panel');
+  assert.ok(running.indexOf('reader-progress') < running.indexOf('data-action="add-excerpt"'), 'progress comes before the other actions');
+  assert.match(running, /id="res-check-now" class="button primary" data-action="reader-check-all" disabled/, 'Check now cannot start a second read');
+  assert.equal((running.match(/class="button primary"/g) || []).length, 1);
 });
 
 test('receipts and findings escape every character and navigate to the account review', async () => {
@@ -1464,6 +1776,23 @@ test('restored receipts are labeled imported history', () => {
   assert.match(page.ui.readerReceiptHtml({...receiptFor(hex('4')), origin:'historical'}), /Imported history/);
 });
 
+test('the server\'s historical origin is labeled imported in Today and in the list, and live is not', async () => {
+  const entry = (id, origin, completed_at) => ({id: hex(id), origin, completed_at, reader_version: '0.1.0', accounts: [],
+    totals: {accounts: 3, ok: 2, held: 0, error: 0, unsupported: 1, sources: 4, findings: 1}});
+  const summary = {count: 2, source_count: 4, revision_count: 4, limit: 20,
+    recent: [entry('5', 'live', '2026-11-01T10:00:05Z'), entry('6', 'historical', '2026-10-01T10:00:05Z')]};
+  const live = pageFixture({summary});
+  assert.ok(live.ui.readerTodayContent().includes('LATEST SAVED CHECK'));
+  assert.ok(!live.ui.readerTodayContent().includes('IMPORTED'));
+  await live.ui.handleAction({dataset: {action: 'reader-receipts'}});
+  assert.equal((live.dialog().match(/Imported history\./g) || []).length, 1, 'only the restored receipt is labeled in the list');
+  const restored = pageFixture({summary: {...summary, recent: [entry('6', 'historical', '2026-10-01T10:00:05Z')]}});
+  assert.ok(restored.ui.readerTodayContent().includes('LATEST IMPORTED CHECK'));
+  assert.ok(!restored.ui.readerTodayContent().includes('LATEST SAVED CHECK'));
+  await restored.ui.handleAction({dataset: {action: 'reader-receipts'}});
+  assert.ok(restored.dialog().includes('Imported history.'));
+});
+
 test('an X account keeps its canonical profile address; an alias relaxes SFW only when asked', async () => {
   const cases = [
     [{identity_mode: 'alias', daring: 'bold'}, 'alias', 'bold', false],
@@ -1618,6 +1947,7 @@ test('sample data never starts a search', async () => {
 test('a check and a search never overlap', async () => {
   const searching = pageFixture();
   await discover(searching, ['x'], [], {done: false});
+  searching.ui.readerClient.handle('setup', {version: '0.1.0', protocol: 1, x: true, youtube: true});
   assert.match(searching.ui.readerTodayContent(), /id="res-check-now"[^>]*disabled/);
   await act(searching, {action: 'reader-check-all'});
   assert.equal(searching.sent.filter(item => item.type === PREFIX + 'arm').length, 0, 'no check is armed during a search');
@@ -1636,18 +1966,18 @@ test('a check and a search never overlap', async () => {
   assert.ok(checking.get('#reader-discovery-live').innerHTML.includes('A check is running'));
 });
 
-test('a backup written by this version (schema 3) reaches the server; unknown versions do not', async () => {
+test('a backup written by this version (schema 4) reaches the server; unknown versions do not', async () => {
   const page = pageFixture();
-  const payload = {schema_version: 3, accounts: [], reviews: [], settings: {}, reader_checks: []};
+  const payload = {schema_version: 4, accounts: [], reviews: [], settings: {}, reader_checks: []};
   await page.ui.importFile({size: 100, name: 'synthetic.json', text: async () => JSON.stringify(payload)});
-  assert.ok(page.dialog().includes('confirm-import'), 'version 3 reaches the confirmation');
+  assert.ok(page.dialog().includes('confirm-import'), 'version 4 reaches the confirmation');
   page.setHandler(url => url === '/api/import' ? respond({accounts: 0, reviews: 0}) : url === '/api/state' ? respond(page.data) : failure(500, 'Unexpected request ' + url));
   await act(page, {action: 'confirm-import'});
   const sent = page.calls.find(call => call.url === '/api/import');
   assert.ok(sent, 'the import was sent');
   assert.equal(sent.method, 'POST');
   assert.deepEqual(JSON.parse(sent.body), payload, 'the file is sent as it was');
-  for (const version of [4, 0, '3', true, null]) {
+  for (const version of [5, 0, '4', true, null]) {
     const bad = pageFixture();
     await bad.ui.importFile({size: 100, name: 'synthetic.json', text: async () => JSON.stringify({...payload, schema_version: version})});
     assert.ok(bad.get('#dialog-error').textContent.includes('Choose a Resonance backup'), String(version));

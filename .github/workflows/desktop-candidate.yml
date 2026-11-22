@@ -1,32 +1,57 @@
 name: Desktop candidate
-# Manual only. This builds unsigned candidate archives as build evidence. It creates no
-# release, uses no secrets or signing identity, and publishes nothing. A green run is not
-# proof that a person on a real Windows or Mac computer could install and use Resonance.
+# Manual only. The workflow stores unsigned candidate evidence in the job's artifacts.
 on: workflow_dispatch
 permissions:
   contents: read
 jobs:
   candidate:
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-15
+            architecture: arm64
+            target: macos-arm64
+          - os: macos-15-intel
+            architecture: x64
+            target: macos-x86_64
+          - os: windows-2025
+            architecture: x64
+            target: windows-x86_64
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        shell: bash
+        shell: pwsh
+    env:
+      DESKTOP_TARGET: ${{ matrix.target }}
+      PYTHONNOUSERSITE: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.11'
-      - uses: actions/setup-node@v4
+          python-version: '3.14.10'
+          architecture: ${{ matrix.architecture }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
-      - run: python -m pip install -r requirements.txt -r desktop/requirements-build.txt
-      - run: python -m unittest discover -s tests
+          node-version: '24'
+          package-manager-cache: false
+      - name: Prepare the locked build venv
+        run: |
+          $venv = Join-Path $env:RUNNER_TEMP build-venv
+          python -I -B tools/prepare_build.py --out $venv --target $env:DESKTOP_TARGET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = if ($IsWindows) { 'Scripts/python.exe' } else { 'bin/python' }
+          $python = Join-Path $venv $exe
+          $bin = Split-Path -Parent $python
+          # The Node suites spawn python3 directly. Windows venvs supply python.exe.
+          if ($IsWindows) { Copy-Item $python (Join-Path $bin 'python3.exe') }
+          $bin >> $env:GITHUB_PATH
+          "VENV_PYTHON=$python" >> $env:GITHUB_ENV
+      - run: python3 -I -c "import os, pathlib, sys; assert pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ['VENV_PYTHON']).parent.parent.resolve()"
+      - run: '& $env:VENV_PYTHON -E -s -m unittest discover -s tests -v'
       - run: node tests/test_ui_actions.cjs
       - run: node tests/test_ui_communication.cjs
       - run: node tests/test_ui_today.cjs
@@ -34,15 +59,25 @@ jobs:
       - run: node tests/test_browser_reader.cjs
       - run: node tests/test_reader_discovery.cjs
       - run: node tests/test_reader_pipeline.cjs
-      # Exports only the public allowlist outside this checkout, then runs that export's own suites.
-      - run: python tools/make_release.py --version "$(tr -d '[:space:]' < VERSION)" --out "$RUNNER_TEMP/runtime"
-      - run: python tools/build_desktop.py --runtime "$RUNNER_TEMP/runtime" --out "$RUNNER_TEMP/candidate" --plan
-      - run: python tools/build_desktop.py --runtime "$RUNNER_TEMP/runtime" --out "$RUNNER_TEMP/candidate"
-      - uses: actions/upload-artifact@v4
+      # The release exporter runs the exported tree's own suites with this venv.
+      - name: Export and test the public runtime
+        run: |
+          $version = (Get-Content -Raw VERSION).Trim()
+          & $env:VENV_PYTHON -I -B tools/make_release.py --version $version --out "$env:RUNNER_TEMP/runtime"
+      - name: Plan the native candidate
+        run: |
+          & $env:VENV_PYTHON -I -B tools/build_desktop.py --target $env:DESKTOP_TARGET --runtime "$env:RUNNER_TEMP/runtime" --out "$env:RUNNER_TEMP/candidate" --plan
+      - name: Build the native candidate
+        run: |
+          & $env:VENV_PYTHON -I -B tools/build_desktop.py --target $env:DESKTOP_TARGET --runtime "$env:RUNNER_TEMP/runtime" --out "$env:RUNNER_TEMP/candidate"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item "$env:RUNNER_TEMP/build-venv/build-evidence/pip-*.json" "$env:RUNNER_TEMP/candidate"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: resonance-candidate-${{ runner.os }}
+          name: resonance-candidate-${{ matrix.target }}
           path: |
             ${{ runner.temp }}/candidate/*.zip
             ${{ runner.temp }}/candidate/BUILD-MANIFEST.json
+            ${{ runner.temp }}/candidate/pip-*.json
           if-no-files-found: error
           retention-days: 14

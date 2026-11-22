@@ -380,13 +380,13 @@ test("the same content again is deduplicated; changed content appends a revision
   });
 });
 
-test("the format 3 backup of a live history round-trips into a second fresh server as historical receipts", async () => {
+test("the format 4 backup of a live history round-trips into a second fresh server as historical receipts", async () => {
   await withEnv({}, async env => {
     await install(env);
     const one = await saved(env, "x", "yt", "other");
     const two = await saved(env, "x", "yt");
     const backup = await env.adapter.request("/api/export");
-    assert.equal(backup.schema_version, 3);
+    assert.equal(backup.schema_version, 4);
     assert.deepEqual(backup.reader_checks.map(item => item.id).sort(), [one.id, two.id].sort());
     assert.deepEqual([backup.reader_sources.length, backup.reader_revisions.length], [6, 6]);
     assert.ok(backup.reader_checks.every(item => item.origin === "live"));
@@ -464,6 +464,33 @@ test("a disconnect of the reader after the first account saves no partial result
     await nothingSaved(env);
     assert.equal(page.of("done").length + page.of("result").length, 1, "only the first account ever answered");
     assert.equal(w.connects, 1, "nothing reconnects by itself");
+  });
+});
+
+test("after the worker drops, the next trusted Check click reconnects, waits for a fresh setup, then begins and saves", async () => {
+  await withEnv({}, async env => {
+    const { w, page } = env;
+    await install(env);
+    w.kill(); // the idle service worker goes away; the page learns only that it is disconnected
+    await untilReal(() => env.client.setup.status === "offline", "the client to see the disconnect", () => describe(env));
+    assert.equal(w.connects, 1, "nothing reconnects by itself");
+    assert.deepEqual(env.adapter.sent("POST", "/api/checks/begin"), []);
+    page.click("res-check-now");
+    const started = env.client.start([env.accounts.x.id]);
+    assert.equal(started.ok, true, started.message);
+    const current = env.client.check;
+    assert.equal(current.phase, "reconnecting", "nothing is reserved until the reader answers");
+    assert.deepEqual(env.adapter.sent("POST", "/api/checks/begin"), []);
+    // A second click while reconnecting is refused and arms nothing more.
+    page.click("res-check-now");
+    assert.equal(env.client.start([env.accounts.x.id]).ok, false);
+    await untilReal(phase(env, "saved", "failed", "cancelled", "discarded", "unknown"), "the check to finish", () => describe(env), 60000);
+    assert.equal(current.phase, "saved", describe(env));
+    assert.equal(w.connects, 2, "one fresh connection, made by the click");
+    assert.equal(env.client.setup.status, "installed");
+    assert.equal(env.adapter.sent("POST", "/api/checks/begin").length, 1);
+    assert.equal(page.of("armed").length, 1);
+    assert.equal((await counts(env)).checks, 1);
   });
 });
 

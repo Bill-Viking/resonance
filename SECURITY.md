@@ -25,11 +25,88 @@ Do not put Resonance behind a public proxy, a tunnel or a port-forward. It was n
 
 ## Your assistant is a separate program
 
-An AI assistant that collects your posts runs with its own permissions, in its own tools. Resonance grants it nothing and sends it nothing. What the assistant may and may not do is written in [ASSISTANT.md](ASSISTANT.md); the rule that matters most is that nothing on a platform is changed without your yes, at that moment, for that item.
+The in-app Codex manual serves fixed local HTML, CSS and synthetic example
+images under `/guide/`. Opening the guide reads no account, report or inbox
+data. Its external documentation link opens only when selected.
 
-Assistant edit/removal starts also require a fresh local identity comparison bound to that exact request, source evidence, saved account and boundary. The assistant supplies the observed active handle/profile and source author through the normal guarded JSON API or command line. Missing, mismatched, changed, expired or imported-only checks cannot start an attempt. Matches expire five minutes after observation; replacing a check revokes its earlier ID. The last-look command reads this condition without writing. A saved request from before identity history existed has none; it is read as unknown, never as a match, so it carries no action authority and cannot block the last look at a different request. The last look still refuses any request with another field missing or inconsistent. Identity history is portable, but its local start-guard table is not exported and imported requests lose local guards. Database schema 3 adds this table through the existing backup/rollback migration; portable backup format remains 2.
+Image post recovery saves private copies of the selected images, captions,
+account URLs, observations and post links under `image-posts/post-<job>` in
+the local data folder. The assistant kit writes the record before each browser
+attempt, checks the selected file's SHA-256 digest and rejects stale updates.
+The assistant supplies live observations through its own browser tools. RES
+cannot independently authenticate the observations or detect an upload made
+outside this workflow. Recovery files stay outside portable JSON backups and
+sample workspaces. They remain on disk until you remove that job's folder.
+Removing a job also removes its delivery history.
+
+The social inbox workspace keeps entered summaries and reply drafts in tab
+memory. Reloading or closing the page clears them. These entries stay outside
+the server, backups and public reports. Copying a request or draft puts the
+selected text on the system clipboard. Giving a request to an external
+assistant lets that assistant see the selected content under its own privacy
+settings. Visiting a notification feed or conversation may update the service's
+viewed state or read receipts. The local app has no notification listener,
+inbox credentials or send endpoint.
+
+`GET /api/assistant?purpose=social-inbox` returns the path to the assistant
+contract. This request carries no thread name, messages, notification text or
+draft. In a desktop package it uses the same verified assistant kit as the
+ordinary public-review prompt.
+
+An AI assistant that collects your posts runs with its own permissions, in its own tools. Resonance grants it nothing and sends it nothing. What the assistant may and may not do is written in [ASSISTANT.md](ASSISTANT.md); the rule that matters most is that nothing on a platform is changed without current user authorization. Permanent deletion always needs your current yes for that exact item. Only an explicit Work Safe delegation may cover recoverable removal or its specified fallback edit within a defined scope, where the tool permits preauthorization; every tool-required confirmation still applies.
+
+In a packaged desktop app, the assistant prompt names a verified public code kit
+outside the app bundle and saved-data folder. The app checks the kit's explicit
+file list, sizes and SHA-256 hashes, refuses changed existing kits, and copies no
+workspace data. It validates each existing folder on the destination path, creates
+only the folders that are missing, and rejects redirects (symbolic links and
+reparse points) and anything that is not a folder. A failed check returns a fixed
+repair message. This is local file
+integrity checking, not authentication of an assistant or a provider. Source runs
+continue to name their source folder. The command-line entry point disables Python
+bytecode writes before importing its local modules. The coverage helper does the
+same, so running it cannot add a cache file that invalidates the verified kit.
+
+Assistant edit/removal starts also require a fresh local identity comparison bound to that exact request, source evidence, saved account and boundary. The assistant supplies the observed active handle/profile and source author through the normal guarded JSON API or command line. Missing, mismatched, changed, expired or imported-only checks cannot start an attempt. Matches expire five minutes after observation; replacing a check revokes its earlier ID. The last-look command reads this condition without writing. A saved request from before identity history existed has none; it is read as unknown, never as a match, so it carries no action authority and cannot block the last look at a different request. The last look still refuses any request with another field missing or inconsistent. Identity history is portable, but its local start-guard table is not exported and imported requests lose local guards. Database schema 3 adds this table through the existing backup/rollback migration; this migration retained portable backup format 2. Current exports use format 4.
 
 This compares what the assistant reported. It cannot authenticate a provider session, validate the truth of an observation, detect a browser account switch or constrain another program's own browser tools. The assistant must inspect the active account again before clicking. A matching comparison neither replaces the user's authorization nor proves the platform result. The app still reads no credentials and makes no outgoing connection.
+
+For supported exact Facebook comment/reply links, the parent post's URL owner
+is not compared as though they wrote the comment. This exception requires one
+nonblank `comment_id`, and at most one nonblank `reply_comment_id` when supplied.
+It grants no authorship proof: fresh observed active-account and comment-author
+identities must both match the saved account. Bare parent posts retain the URL
+owner check. The supported source routes, binding, expiry and one-attempt rules
+are unchanged.
+
+## Discovery and coverage records
+
+The Work Safe skill includes a standalone, read-only coverage-ledger checker.
+It reads the supplied ledger and optional inventory, validates their structure and recorded completion
+evidence, and emits a result. It opens no database, makes no outgoing connection
+and changes no report or request. It is not a server-enforced audit gate, provider
+verification, content classifier or proof that an assistant omitted nothing.
+Its ledger belongs with private application data. Passing it grants no authority
+to edit, delete or retry; the existing identity, attempt and confirmation guards
+still apply.
+
+Facebook comment discovery additionally uses a read-only DOM collector through
+the external assistant's browser tools and a standalone local inventory helper.
+The collector reads activity-row navigation metadata, not post text, cookies or
+hidden application state; it clicks nothing and makes no network request. The
+Python helper reads bounded JSON, validates supported routes and observed row
+identity, and writes only JSON to standard output. Metadata snapshots and the
+inventory stay beside the report in the private data folder. Reconciliation
+binds the version 2 ledger to the inventory's canonical account, run identifier
+and scope text, checks exact coverage targets, and preserves pagination/filter/
+identity gaps. Facebook ledgers with any comment or reply surface in scope
+cannot pass without the inventory. An empty inventory stays incomplete. Older
+ledgers need explicit account/run metadata; this changes no app database or backup
+format. These are assistant-reported observations, not
+provider authentication or proof that all available history was traversed. A
+missing/unsupported row is a gap, never deletion evidence. The app's server and
+production browser-extension permissions are unchanged. Procedure and command
+forms: [Facebook discovery](docs/FACEBOOK-DISCOVERY.md).
 
 ## Reporting a problem
 
@@ -53,7 +130,7 @@ Assistant reports may include small inline context previews. Each is limited to 
 
 Edit starts additionally require an available text-edit observation in that same fresh, request-bound identity check. The exact source and timestamp must agree. Availability is assistant-reported, not authenticated by Res; the assistant must inspect the actual controls again immediately before clicking. Checks expire after five minutes or an explicitly observed provider deadline. No platform-wide time limit is guessed. Missing, unknown, unavailable, stale, changed or historical-only observations cannot enable an edit. A newer conflicting report stops execution without changing the content fingerprint or granting a retry. Report history can only hold work; it never confers start authority.
 
-Schema 4 is a backed-up format barrier for the new optional observation fields; it changes no existing table or row. Earlier app versions refuse that newer schema. Portable format stays 2; old records without availability stay valid and unknown. Imported request observations remain history without local start guards. Local follow-up reply/separate-post drafts are held only in tab memory and copied on request. They create no provider request, replace no existing request, transfer no authority and publish nothing. The app still has no provider connection, credentials or model.
+Schema 4 is a backed-up format barrier for the new optional observation fields; it changes no existing table or row. Earlier app versions refuse that newer schema. This migration retained portable format 2; current exports use format 4. Old records without availability stay valid and unknown. Imported request observations remain history without local start guards. Local follow-up reply/separate-post drafts are held only in tab memory and copied on request. They create no provider request, replace no existing request, transfer no authority and publish nothing. The app still has no provider connection, credentials or model.
 
 A newer conflicting report revokes the old combined start check. A later report
 that says editing is available cannot revive it; inspect again and save a new
@@ -68,7 +145,7 @@ Intake is separate from findings and from edit/delete requests, and every item i
 
 A saved request holds an evaluation and an optional proposed reply or edit as text. Its states (needs review, prepared, done, dismissed) are local notes. None creates an action request, an identity check, a start guard, a receipt that Resonance verified or any permission; none publishes anything. Edits and deletions keep every guard above, and a reply needs its own separate publishing workflow. A done request records only that it was handled locally, unless a receipt link and note were explicitly recorded, which stays a note. A comment read again with the same words reopens nothing; changed words keep the earlier version in history and need review again.
 
-Database schema 5 adds one table, `request_inbox`, through the existing backup/rollback migration; earlier app versions refuse the newer schema. Portable backup format stays 2: `request_inbox` is an optional key, absent in older backups, validated record by record and atomically on import, never rolls a newer local decision back, and restores no authority because none exists. The inbox holds at most 2,000 comments and 10 earlier versions each.
+Database schema 5 adds one table, `request_inbox`, through the existing backup/rollback migration; earlier app versions refuse the newer schema. This migration retained portable backup format 2; current exports use format 4. `request_inbox` is an optional key, absent in older backups, validated record by record and atomically on import, never rolls a newer local decision back, and restores no authority because none exists. The inbox holds at most 2,000 comments and 10 earlier versions each.
 
 
 ### Reader-check intake (candidate)
@@ -97,4 +174,19 @@ Schema 6 adds `reader_checks` (immutable receipts), `reader_sources` (one row pe
 - One transaction saves corpus, revisions, review evidence for findings only, and the receipt, or nothing. An identical payload for a saved ID returns the original receipt; a different payload for that ID is refused; imported receipts are marked historical and can never authorize or replay live work. A check is refused when the resulting portable backup would exceed the 32 MiB import limit minus 64 KiB; history is never silently dropped.
 - Text is stored and hashed as exact UTF-8 (NBSP, leading, trailing and blank lines kept). Unchanged text reuses its revision; changed text appends one. Review IDs are deterministic per account, source and revision, so a re-read rewrites no status, time or wording, Keep and Snooze decisions survive, and newly clean text never completes or verifies an outstanding provider action.
 - `GET /api/checks/<id>`, `GET /api/corpus?account_id=…&cursor=…&limit=…` (max 50) and `GET /api/corpus/sources/<id>/revisions` need the workspace token and refuse samples. `/api/state` carries at most 20 concise check summaries and counts, never corpus text.
-- Portable backup format 3 adds `reader_checks`, `reader_sources` and `reader_revisions` (formats 1 and 2 still import, with those keys absent and treated as empty; they are refused in a format 1 or 2 file). Import validates identifiers, hashes, receipt digests and cross-references before any write and is atomic and idempotent. The receipt seal is an integrity check only and is never treated as proof of meaning: Python re-validates every receipt row (status, reason, identity, coverage, counters, times) and checks that each receipt, source and revision names a present receipt that reports it, so a backup with recomputed hashes but impossible or orphaned history is refused. Reader versions 0.0.6 and 0.1.0 can be restored; only 0.1.0 can be saved. A restored receipt is historical evidence and does not authenticate the browser signed in today. Fields that later checks may have updated (author, channel, date) are compared only to the check that last saw the source. An import that adds reader history is refused, with nothing written, if the merged portable backup would exceed the same 32 MiB limit minus 64 KiB. An older app version refuses schema 6.
+- Portable backup format 3 introduced `reader_checks`, `reader_sources` and `reader_revisions` (formats 1 and 2 still import, with those keys absent and treated as empty; they are refused in a format 1 or 2 file). Import validates identifiers, hashes, receipt digests and cross-references before any write and is atomic and idempotent. The receipt seal is an integrity check only and is never treated as proof of meaning: Python re-validates every receipt row (status, reason, identity, coverage, counters, times) and checks that each receipt, source and revision names a present receipt that reports it, so a backup with recomputed hashes but impossible or orphaned history is refused. Reader versions 0.0.6 and 0.1.0 can be restored; only 0.1.0 can be saved. A restored receipt is historical evidence and does not authenticate the browser signed in today. Fields that later checks may have updated (author, channel, date) are compared only to the check that last saw the source. An import that adds reader history is refused, with nothing written, if the merged portable backup would exceed the same 32 MiB limit minus 64 KiB. An older app version refuses schema 6.
+
+## Public branding preferences
+
+The local brand record stores a validated public signature choice and a boolean
+banner preference. Both default off when absent from an older record or backup.
+They appear in the read-only assistant profile and ordinary readable backups.
+They contain no image, do not fetch an asset and grant no authority to publish
+or change a platform. The app never appends branding to stored posts or mail.
+The import preview identifies changes to these choices before confirmation.
+Database schema 7 is a format barrier: upgrades use the normal pre-upgrade
+snapshot, and older editions refuse the newer workspace before reading its brand
+record. Portable backups use format 4; this edition imports formats 1–4. Older
+editions reject format 4. Keep a pre-upgrade copy if a downgrade is needed.
+An external assistant applies any opted-in treatment only to new public drafts
+under [AUTHORING.md](AUTHORING.md).

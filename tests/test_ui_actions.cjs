@@ -55,6 +55,18 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
 
 (async()=>{
   const t=setup();
+  const caption=setup();
+  const captionSource=caption.ui.state.data.source_items[0];
+  caption.ui.state.data.reviews.forEach(review=>{review.kind='post';});
+  caption.ui.fixNowDialog(captionSource.id,'edit');
+  assert.doesNotMatch(caption.html(),/Tag people/);
+  caption.ui.state.data.accounts[0].platform='Facebook';
+  caption.ui.fixNowDialog(captionSource.id,'edit');
+  assert.match(caption.html(),/type @ on Facebook and choose the person from the suggestions/);
+  assert.match(caption.html(),/Tag people control adds an “is with” line/);
+  caption.ui.fixNowDialog(captionSource.id,'delete');
+  assert.doesNotMatch(caption.html(),/Tag people/);
+
   const practice=setup();
   practice.ui.state.data.workspace={mode:'samples',token:'sample-epoch'};
   practice.ui.renderSampleBanner();
@@ -133,13 +145,13 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
   assert.equal(storage.calls.at(-1).method,'POST');
   assert.equal(storage.calls.at(-1).body,'{}');
   assert.equal(openButton.disabled,false);
-  for (const version of [1,2,3]) {
+  for (const version of [1,2,3,4]) {
     const importer=setup();
     const payload={schema_version:version,accounts:[],reviews:[],settings:{}};
     await importer.ui.importFile({size:100,name:'synthetic.json',text:async()=>JSON.stringify(payload)});
     assert.ok(importer.html().includes('confirm-import'),`backup v${version} reaches confirmation`);
   }
-  for (const version of [true,0,4,'2']) {
+  for (const version of [true,0,5,'2']) {
     const importer=setup();
     const payload={schema_version:version,accounts:[],reviews:[],settings:{}};
     await importer.ui.importFile({size:100,name:'synthetic.json',text:async()=>JSON.stringify(payload)});
@@ -217,7 +229,7 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
   assert.ok(!contextView.ui.sourceCard(contextItem).includes('No sensitive text noticed'));
 
   const queuedCard=()=>queue.ui.sourceCard(queue.ui.state.data.source_items[0]);
-  assert.match(queuedCard(),/Asked your assistant to edit · not changed yet · next check .+ · it asks your yes first/);
+  assert.match(queuedCard(),/Asked your assistant to edit · not changed yet · next check .+ · needs your current permission/);
   queue.ui.state.data.action_requests[0].action='delete';
   assert.match(queuedCard(),/Asked your assistant to delete · not deleted yet · next check /);
   queue.ui.state.data.action_requests[0].scheduled_for=null;
@@ -383,6 +395,17 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
   assert.ok(legacyHold.html().includes('Imported authority requires a fresh local confirmation.'));
   assert.ok(legacyHold.html().includes('cannot run until you confirm it'));
 
+  const hostileHold=setup();
+  const hostileReason='<button data-action="confirm-request" data-id="q1">Approve</button><img src=x onerror=alert(1)>';
+  hostileHold.ui.state.data.action_requests[0].confirmation_required=true;
+  hostileHold.ui.state.data.action_requests[0].blocker_reason=hostileReason;
+  hostileHold.ui.requestDetail('q1');
+  const hostileHtml=hostileHold.html();
+  assert.ok(hostileHtml.includes('Held: &lt;button data-action=&quot;confirm-request&quot;')||hostileHtml.includes('Held: &lt;button data-action="confirm-request"'),'the held reason is shown as text');
+  assert.ok(!hostileHtml.includes(hostileReason),'the raw markup never reaches the dialog');
+  assert.ok(!hostileHtml.includes('<img src=x'),'an injected element is not created');
+  assert.equal((hostileHtml.match(/data-action="confirm-request" data-id="q1">Approve/g)||[]).length,0,'an injected control is not a real control');
+
   const snooze=setup();
   snooze.setHandler((url)=>url==='/api/state'?response(snooze.data):response({source_item:{...snooze.data.source_items[0],status:'snoozed'}}));
   await snooze.ui.updateSourceStatus({...element(),dataset:{source:'source-1',status:'snoozed'}});
@@ -455,12 +478,12 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
   assert.ok(routes.html().includes('Ask my assistant to delete'));
   assert.equal(routes.calls.length,0,'the Delete chooser saves nothing');
   assert.ok(routes.html().includes('Queued for the assistant’s next check'),'the queued deletion names when it is expected to run');
-  assert.ok(routes.html().includes('Deletion still needs your yes at the time it happens.'),'the queued deletion keeps its confirmation gate');
+  assert.ok(routes.html().includes('Permanent deletion still needs your yes at the time it happens.'),'the queued deletion keeps its confirmation gate');
   assert.ok(routes.html().includes('never contacts the platform'));
   routes.ui.sourceModifyDialog('source-1');
   assert.ok(routes.html().includes('Ask my assistant to edit'));
   assert.ok(routes.html().includes('Some edits need your confirmation then.'),'a queued edit does not claim a gate it may not have');
-  assert.ok(!routes.html().includes('Deletion still needs your yes'),'the modify routes make no deletion claim');
+  assert.ok(!routes.html().includes('Permanent deletion still needs your yes'),'the modify routes make no deletion claim');
   assert.match(routes.html(),/data-action="fix-now-choice" data-source="source-1" data-fix-action="edit"/);
   assert.match(routes.html(),/data-action="assistant-choice" data-source="source-1" data-request-action="edit"/);
   assert.match(routes.html(),/data-action="source-retract" data-source="source-1"/);
@@ -657,7 +680,8 @@ const response=data=>({ok:true,json:async()=>structuredClone(data)});
   keptToday.ui.state.data.action_requests=[];
   const keptHtml=keptToday.ui.renderOverview();
   assert.ok(keptHtml.includes('<strong>1</strong> kept post.'));
-  assert.ok(keptHtml.indexOf('id="today-summary-content"')<keptHtml.indexOf('View saved posts')&&keptHtml.indexOf('View saved posts')<keptHtml.indexOf('class="today-grid"'));
+  assert.ok(keptHtml.indexOf('id="today-summary-content"')<keptHtml.indexOf('class="today-grid"')&&keptHtml.indexOf('class="today-grid"')<keptHtml.indexOf('id="today-kept-content"')&&keptHtml.indexOf('id="today-kept-content"')<keptHtml.indexOf('View saved posts'),'the kept line closes Today inside its own refreshable container');
+  assert.ok(keptHtml.includes('Export brief'),'the brief export sits with the kept line');
   assert.ok(keptHtml.includes('data-action="review-filter" data-status="history"'));
   assert.ok(setup().ui.renderOverview().includes('<strong>0</strong> kept posts.'));
 

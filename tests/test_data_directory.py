@@ -149,15 +149,15 @@ class DataDirectoryTests(unittest.TestCase):
         with self.assertRaisesRegex(server.Invalid, 'could not be read'):
             server.safe_data_directory(self.root / 'anywhere')
 
-    def test_mac_builder_imports_shared_resolver(self):
+    def test_mac_builder_requires_explicit_owner_and_uses_a_distinct_identifier(self):
         spec = importlib.util.spec_from_file_location('launcher_builder', server.ROOT / 'mac-launcher' / 'build.py')
         builder = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(builder)
-        self.assertIs(builder.data_directory, server.data_directory)
         config = self.root / 'release.json'
-        self.assertEqual(builder.bundle_identifier(config), 'io.github.resonance-project.resonance')
+        with self.assertRaisesRegex(ValueError, 'missing'):
+            builder.bundle_identifier(config)
         config.write_text('{"github_owner":"Example-Owner"}')
-        self.assertEqual(builder.bundle_identifier(config), 'io.github.example-owner.resonance')
+        self.assertEqual(builder.bundle_identifier(config), 'io.github.example-owner.resonance.launcher')
         config.write_text('{"github_owner":"../invalid"}')
         with self.assertRaises(ValueError):
             builder.bundle_identifier(config)

@@ -1188,7 +1188,8 @@ test("the build tool validates the package with the discovery markers and refuse
   const tool = path.join(ROOT, "tools", "build_reader.py");
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "res-disc-build-"));
   try {
-    const ok = childProcess.spawnSync("python3", ["-I", tool, "--out", path.join(base, "a")], { encoding: "utf8" });
+    const runtime = require("./reader-fixtures/audited_runtime.cjs").auditedRuntime(ROOT, base);
+    const ok = childProcess.spawnSync("python3", ["-I", tool, "--runtime", runtime, "--out", path.join(base, "a")], { encoding: "utf8" });
     assert.equal(ok.status, 0, ok.stderr);
     const source = fs.readFileSync(tool, "utf8");
     for (const marker of ["res-find-accounts", "cancel-discovery", "DISCOVERY_RESULT", "validDiscoveryDestination"]) assert.ok(source.includes(marker), marker);

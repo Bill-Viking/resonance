@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Start in Codex or Claude Code · Resonance manual</title>
+  <link rel="stylesheet" href="manual.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Resonance user manual</p>
+      <h1>Start in Codex or Claude Code</h1>
+      <p>Open the Resonance folder as a local project. Ask for a draft right in the chat. The local dashboard is there when you want to browse accounts, posts and reports.</p>
+      <nav aria-label="Examples"><a href="#project">Start a project chat</a><a href="#public">Open the dashboard</a><a href="#inbox">Triage notifications</a></nav>
+    </header>
+    <section id="project">
+      <h2>Use RES in a project chat</h2>
+      <p>Download the <a href="https://github.com/Bill-Viking/resonance/releases" rel="noreferrer">RES source ZIP</a> and extract it. Choose the folder containing <code>README.md</code>, <code>AUTHORING.md</code> and <code>ASSISTANT.md</code>.</p>
+      <dl>
+        <dt>Codex</dt><dd>Add or open the extracted folder as a local project. Select it in the sidebar and start a chat in that project.</dd>
+        <dt>Claude Code</dt><dd>In Claude Desktop, open <strong>Code</strong>, choose a local session, then <strong>Open folder</strong> and select Resonance. In the terminal edition, open the folder in your terminal and run <code>claude</code>.</dd>
+      </dl>
+      <figure id="project-example" aria-label="Illustrated local project chat">
+        <figcaption>Local project chat <span>Illustrated example</span></figcaption>
+        <div class="project-chat"><div class="project-list"><strong>Projects</strong><div class="selected-project">▱ &nbsp;Resonance</div><span>Caption draft</span></div>
+        <div class="project-messages"><div class="turn question"><strong>You</strong><p>Use RES and read AUTHORING.md. Give me two short Instagram captions for a neighborhood photo walk at noon. Skip the signature. Keep both drafts here.</p></div>
+        <div class="turn answer"><strong>Example reply</strong><p>1. Cameras ready? Join the neighborhood photo walk at noon.</p><p>2. Take a lunchtime walk and see the neighborhood through a new lens.</p></div></div></div>
+      </figure>
+      <p>The folder supplies the RES instructions. The assistant supplies the writing. A first draft needs no running RES server or social sign-in. For a check of live posts, ask the assistant to read <code>ASSISTANT.md</code> and run your RES check. It needs local Python, saved account information and a supported browser or connector with the right account signed in.</p>
+    </section>
+    <section id="public">
+      <h2>Open the optional dashboard</h2>
+      <p>In the same project chat, ask <strong>“Start the local RES server from this folder and open it in the app’s browser or preview pane.”</strong> The source edition needs Python 3.9 or later. On Windows install the dependencies in <code>requirements.txt</code> first. The command is <code>python3 server.py</code> on Mac or Linux and <code>py -3 server.py</code> on Windows. Open <code>http://127.0.0.1:4317</code> in Codex’s browser, Claude Desktop’s local Browser pane or your usual browser. Keep the server running while using the dashboard.</p>
+      <h3>1. Copy the request in RES</h3>
+      <p>Save the social account you want to review. On <strong>Today</strong>, choose <strong>Ask my assistant</strong>, then <strong>Copy sentence</strong>. RES includes the folder for your installation.</p>
+      <img class="dialog-shot" src="copy-request.jpg" width="600" height="420" alt="RES displays a one-sentence request and a yellow Copy sentence button.">
+      <h3>2. Paste it into Codex</h3>
+      <p>Open a new local chat in Codex on the computer running RES. If asked to choose a project, select the folder named in the copied sentence. Paste the full sentence into the message box, then send it. Use the path from your own copy.</p>
+      <figure id="exchange" aria-label="Example Codex conversation">
+        <figcaption>Example conversation <span>Public-post check</span></figcaption>
+        <div class="turn question"><strong>You paste into Codex</strong><p>Read ASSISTANT.md in /private/tmp/example-resonance and run my Resonance check.</p></div>
+        <div class="turn answer"><strong>Example Codex reply</strong><p>I checked three recent posts. One may need a closer look. I saved the report in RES. Older posts were outside this check.</p></div>
+      </figure>
+      <p>Codex needs access to that folder, a way to run local commands and access to the relevant signed-in browser. If it asks you to sign in, use the platform in the browser it identifies. Enter your password there.</p>
+      <h3>3. Review the result in RES</h3>
+      <p>Open <strong>Today → Latest assistant report</strong> or <strong>Check history</strong>. Read which accounts and posts were covered and what Codex could not inspect. Open a finding to decide what to do.</p>
+    </section>
+    <section id="inbox">
+      <h2>Triage notifications</h2>
+      <p>The source edition and Windows desktop app include Social inbox. This example uses a fictional Instagram account.</p>
+      <h3>1. Choose the account and task</h3>
+      <p>Open <strong>Today → Social inbox</strong>. Choose <strong>Triage recent notifications</strong> and one saved account, then <strong>Open workspace</strong>.</p>
+      <img src="choose-account.jpg" width="814" height="151" alt="The task is Triage recent notifications. The account is Instagram · example_walk. Open workspace is selected next.">
+      <h3>2. Take the scoped request to Codex</h3>
+      <p>Read the scope under <strong>Ask your assistant</strong>. Review the disclosure, check the authorization box, choose <strong>Prepare assistant request</strong>, then <strong>Copy assistant request</strong>. Paste the complete request into your Codex chat. It covers up to ten visible notifications. Opening the list may clear a badge.</p>
+      <h3>3. Bring the summaries back</h3>
+      <p>In the same RES tab, paste one short summary per line and choose <strong>Add summaries</strong>. Choose <strong>Needs reply</strong> for a question, or <strong>Handled here</strong> to mark your local decision. Reloading or closing the tab clears these notes.</p>
+      <img src="triage-results.jpg" width="790" height="222" alt="A question about the photo walk is marked Needs reply. A like is marked Handled here.">
+      <p>For help answering one person, choose <strong>Draft replies for one private conversation</strong> when setting the scope. Review the draft before deciding whether to send it yourself.</p>
+    </section>
+    <footer><a href="https://developers.openai.com/codex/quickstart/" rel="noreferrer">Codex quickstart</a> · <a href="https://code.claude.com/docs/en/desktop-quickstart" rel="noreferrer">Claude Code desktop quickstart</a></footer>
+  </main>
+</body>
+</html>

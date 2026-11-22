@@ -1,10 +1,9 @@
 # Resonance Reader (browser extension, preview 0.1.0)
 
 Source-only note for builders; this file is not part of the shipped package.
-This is the transport and package increment only. It is not the finished
-first-user flow: store publication, app UI integration, install discovery and
-fresh-user proof are separate and not done. Nothing here has run against a real
-provider, a real browser or real data.
+The app includes account discovery and Check now integration. Store publication
+and fresh-user native/provider acceptance remain pending; passing synthetic tests
+is not proof of those gates.
 
 The extension reads a person's own recent X posts and YouTube comments after
 they click **Check now** in the local Resonance app, and hands the complete,
@@ -13,16 +12,15 @@ after the whole check has been read.
 
 The reader logic (exact text, identity checks, canonical-source rechecks, owned
 tab rules, permission/timeout/cancel cleanup) is the R1-accepted code from
-`experiments/live-reader-spike`, with Facebook, fixture mode and the dev port
-removed. The development experiment is unchanged.
+the earlier development spike, with Facebook, fixture mode and the dev port
+removed. The synthetic test harness and fixtures live under `tests/reader-fixtures`.
 
 ## What ships
 
 `manifest.json` `bridge.js` `shared.js` `reader.js` `worker.js` `options.html`
 `options.js` `popup.html` `popup.js`. Build with
-`python3 tools/build_reader.py --out <new folder>` (see below). No icon ships: the
-only existing artwork (`static/icon.svg`) is the app's, Chrome needs PNGs, and the
-approved logo is a private asset. Store art is parent work.
+`python3 tools/build_reader.py --runtime <audited export> --out <new folder>` (see below). Three PNG icon sizes ship as listed in the manifest and validated by the builder.
+Store listing art remains separate.
 
 Manifest: name `Resonance Reader`, version `0.1.0`, Manifest V3, Chrome 106+,
 `permissions: ["scripting"]`, `host_permissions: ["http://127.0.0.1:4317/*"]`,
@@ -135,7 +133,7 @@ it never gets `done`.
 * Disconnect or worker restart mid-batch: `disconnected {batchId}`, whole batch
   aborted, no `done`. Nothing reconnects or retries; only a fresh trusted click
   with new IDs reconnects. Old results are ignored.
-* The app tab leaving its exact root (a query or fragment counts) stops the batch:
+* The app tab leaving its exact root or adding a query stops the batch; view fragments remain allowed:
   `cancelled`, no further account starts.
 * The extension runs one account at a time across all app tabs; a second
   concurrent start gets `error` / `busy`. A request ID is never reused.
@@ -254,12 +252,14 @@ extension-management URLs.
 
 ## Package
 
-`tools/build_reader.py --out <folder that does not exist>` validates the manifest,
+`python3 tools/build_reader.py --runtime <audited export> --out <folder that does not exist>` first verifies the entire release export and then validates the Reader manifest,
 protocol and file allowlist, refuses symlinks, unexpected files and forbidden
 content, then writes `resonance-reader-0.1.0.zip` (fixed timestamps and modes,
-sorted entries, byte-identical on repeat) and `resonance-reader-0.1.0.sha256.json`
-(zip and per-file SHA256). It does not sign, upload or publish.
+sorted uncompressed entries, byte-identical on repeat without depending on zlib compression) and `resonance-reader-0.1.0.sha256.json`
+(source-manifest digest, zip and per-file SHA256). It packages only verified bytes
+from the export, never the working tree. `--plan` validates without writing an
+output folder. It does not sign, upload or publish.
 
 Tests: `node tests/test_browser_reader.cjs` (uses the development harness and
-invented fixtures under `experiments/live-reader-spike` for the fake browser only;
+invented fixtures under `tests/reader-fixtures` for the fake browser only;
 the shipped files import nothing outside this folder).

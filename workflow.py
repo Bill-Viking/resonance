@@ -200,6 +200,15 @@ def source_author_matches(account, source_url):
     elif platform == "facebook" and (part.hostname or "").lower() in {"facebook.com", "www.facebook.com", "m.facebook.com"}:
         match = re.fullmatch(r"/([^/]+)/posts/[^/]+", path)
         owner = match[1] if match else None
+        # An exact comment selector names a different item from its parent post.
+        # The parent path's owner cannot conflict with the observed comment author.
+        selectors = parse_qsl(part.query, keep_blank_values=True)
+        comment_ids = [value for key, value in selectors if key == "comment_id"]
+        reply_ids = [value for key, value in selectors if key == "reply_comment_id"]
+        if (len(comment_ids) == 1 and comment_ids[0].strip() and
+                len(reply_ids) <= 1 and all(value.strip() for value in reply_ids) and
+                precise_source(source_url, "facebook", "comment")):
+            owner = None
     elif platform == "linkedin" and (part.hostname or "").lower() in {"linkedin.com", "www.linkedin.com"}:
         match = re.fullmatch(r"/posts/([^/]+)_activity-[^/]+", path)
         owner = match[1] if match else None

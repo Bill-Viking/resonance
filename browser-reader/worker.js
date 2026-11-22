@@ -432,8 +432,8 @@ async function readYouTube(job) {
   if (listing.state === "timeout") throw new Stop("held", "activity_unavailable");
   if (listing.state !== "ready") throw new Stop("held", "activity_unavailable");
   const ledger = newLedger();
-  ledger.examined = Number.isInteger(listing.listed) && listing.listed >= 0 && listing.listed <= 64 ? listing.listed : 0;
-  ledger.more = listing.more_available === true;
+  ledger.examined = Number.isInteger(listing.listed) && listing.listed >= 0 ? Math.min(listing.listed, 64) : 0;
+  ledger.more = listing.more_available === true || (Number.isInteger(listing.listed) && listing.listed > 64);
   for (const row of Array.isArray(listing.skipped) ? listing.skipped.slice(0, 16) : []) {
     if (row && L.TOKEN.test(row.reason) && Number.isInteger(row.count) && row.count > 0) ledger.skipped[row.reason] = row.count;
   }

@@ -1,5 +1,7 @@
 # Scheduled check reports
 
+For a first check in a project chat, follow the [illustrated user manual](../static/guide/USING-RES.md).
+
 An assistant follows [ASSISTANT.md](../ASSISTANT.md), which is the whole contract. This page is the reference behind it; where the two differ, ASSISTANT.md is what an assistant does.
 
 Resonance displays reports produced by an authorized assistant using supported browser or connector tools. The scheduler belongs to the assistant's host application. Resonance itself does not sign in to providers, read cookies, collect activity, send messages or delete social content.
@@ -72,7 +74,7 @@ A finding may also carry `text` and `quotes`. Both are optional; a report that o
 ## Assistant workflow
 
 1. Read current account identifiers, identity/SFW/daring settings, previous reports and explicit keep decisions.
-2. Verify the account and inspect its own recent posts/comments/replies. Exclude private messages unless separately authorized. Distinguish the profile being viewed from the account currently signed in.
+2. Verify the account and inspect its own recent posts/comments/replies. Exclude notifications and private messages from this check. A separate [social inbox assistance request](../ASSISTANT.md#social-inbox-assistance) returns its own response outside public monitoring. Distinguish the profile being viewed from the account currently signed in.
 3. Compare with the previous check. Label a first run as a baseline. Record any uncovered time interval, inaccessible activity view or uninspected media. Never describe old findings as newly posted content.
 4. Execute only separately authorized provider actions through the supported tool. Respect current confirmation rules. Permanent deletion may require action-time approval; preserve pending counts and continue independent read-only checks while waiting. This application does not circumvent that gate.
 5. Save the report through `monitor.py`, verify its run ID with `--status`, and present the same concise summary in the requested chat. If ingestion fails, state that the GUI has not updated and preserve the private report for a retry.
@@ -90,8 +92,8 @@ These are separate from reports, findings and action requests. The assistant imp
 - The same words read again update only when they were last seen. Changed words keep the earlier version, evaluation and outcome in history (the last ten) and return the request to needs review at the next revision. An older reading never replaces a newer one.
 - States are needs review, prepared, done and dismissed; done is final. They are local notes. They create no action request, identity check or start guard, and publish nothing.
 - The newest 50 matching requests are listed by `--res-inbox`, with counts for every state. Today shows up to four open requests. Neither refreshes by itself; both show what has been imported.
-- Backups carry the inbox in the optional `request_inbox` key (format 2). Import validates every record and refuses the whole backup on any error; older saved decisions are never rolled back.
-- Backups are format 3. Formats 1 and 2 still import. Format 3 adds the reader-check receipts, exact-text corpus and revisions described under [Reader-check intake](#reader-check-intake-candidate).
+- The optional `request_inbox` key was introduced in backup format 2 and remains in format 4. Import validates every record and refuses the whole backup on any error; older saved decisions are never rolled back.
+- Backups are format 4. Formats 1–3 still import. Format 3 introduced the reader-check receipts, exact-text corpus and revisions described under [Reader-check intake](#reader-check-intake-candidate).
 
 ## Exact-target outcomes and interrupted actions
 

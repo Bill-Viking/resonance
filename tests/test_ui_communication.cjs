@@ -44,11 +44,11 @@ function setup() {
   const source = fs.readFileSync(path.join(__dirname,'../static/app.js'),'utf8');
   const cutoff = source.indexOf("  document.addEventListener('click'");
   assert.ok(cutoff > 0);
-  vm.runInContext(source.slice(0,cutoff) + '\n globalThis.ui={state,accessState,renderAccounts,accountResults,renderSetup,renderMail,mailResults,mailMessageDialog,requestAccessCheck,accountForm,accountSetupDialog,communicationSignature,updateCommunicationView,refreshMonitoring,readAccountIdentity,handleAction,saveForm};\n})();',context);
+  vm.runInContext(source.slice(0,cutoff) + '\n globalThis.ui={state,accessState,renderAccounts,accountResults,renderSetup,renderMail,mailResults,mailMessageDialog,requestAccessCheck,accountForm,accountSetupDialog,communicationSignature,updateCommunicationView,refreshMonitoring,readAccountIdentity,handleAction,saveForm,settingsDialog,importFile,render,reload};\n})();',context);
   context.ui.state.data = structuredClone(data);
   context.ui.state.connected = true;
   context.ui.state.view = 'mail';
-  return {ui:context.ui,get,calls,data,setHandler(fn){handler=fn;},html(){return get('#dialog-content').innerHTML;}};
+  return {ui:context.ui,get,calls,data,document,setHandler(fn){handler=fn;},html(){return get('#dialog-content').innerHTML;}};
 }
 const response = data => ({ok:true,json:async()=>structuredClone(data)});
 
@@ -192,6 +192,203 @@ const response = data => ({ok:true,json:async()=>structuredClone(data)});
   refresh.get('#mail-reply').value = 'Unsaved reply in progress';
   await refresh.ui.refreshMonitoring();
   assert.equal(refresh.get('#mail-reply').value,'Unsaved reply in progress','an open reply dialog is never replaced by the background refresh');
+
+  // Optional RES credit on public drafts: real form render and save behaviour.
+  const creditForm = html => {
+    const start = html.indexOf('<form id="brand-form">');
+    const form = html.slice(start,html.indexOf('</form>',start));
+    const select = form.match(/<select id="brand-public-signature"[^>]*>([\s\S]*?)<\/select>/);
+    const checkbox = form.match(/<input id="brand-public-banner"[^>]*>/);
+    assert.ok(select && checkbox,'both credit controls are inside the brand form');
+    return {form,select:select[1],checkbox:checkbox[0],
+      selected:(select[1].match(/<option value="([a-z]+)" selected>/)||[])[1],
+      checked:/\schecked(\s|>)/.test(checkbox[0])};
+  };
+  const creditSetup = brand => {
+    const c = setup();
+    c.ui.state.data.communication.brand = brand;
+    c.ui.state.view = 'setup';
+    return c;
+  };
+  const legacy = creditSetup({description:'Grounded',audience:'Clients',voice:'Clear',avoid:'Hype',updated_at:new Date().toISOString()});
+  const legacyHtml = legacy.ui.renderSetup();
+  const legacyForm = creditForm(legacyHtml);
+  assert.ok(legacyForm.form.includes('<h3 id="brand-credit-heading">RES credit on public drafts</h3>'),'the credit heading is visible');
+  assert.ok(legacyForm.form.includes('<label for="brand-public-signature">Text signature</label>'));
+  assert.ok(legacyForm.form.includes('Include my approved RES banner'));
+  assert.deepEqual([...legacyForm.select.matchAll(/<option value="([a-z]+)"[^>]*>([^<]*)<\/option>/g)].map(m=>[m[1],m[2]]),
+    [['off','Off'],['compact','Short — RES'],['full','Full — RES and project link']]);
+  assert.ok(legacyForm.form.includes('Optional instructions for your assistant when creating new public posts or replies. Nothing is added or posted automatically. A banner needs an approved image supplied separately.'));
+  assert.equal(legacyForm.selected,'off','a record without the fields renders the signature off');
+  assert.equal(legacyForm.checked,false,'a record without the fields renders the banner off');
+  assert.ok(legacyForm.checkbox.includes('type="checkbox"'),'the banner is a native checkbox');
+  assert.ok(legacyHtml.includes('Grounded') && legacyHtml.includes('Hype'),'existing brand text still renders');
+  const odd = creditSetup({description:'',audience:'',voice:'',avoid:'',updated_at:null,public_signature:'surprise',public_banner:'yes'});
+  const oddForm = creditForm(odd.ui.renderSetup());
+  assert.equal(oddForm.selected,'off','an unknown stored signature falls back to off');
+  assert.equal(oddForm.checked,false,'only a real true value checks the banner');
+
+  const saveBrand = async (c, values) => {
+    let saved = null;
+    c.setHandler((url,options)=>{
+      if (url === '/api/brand') {
+        saved = JSON.parse(options.body);
+        return response({brand:{...saved,updated_at:new Date().toISOString()}});
+      }
+      const next = structuredClone(c.data);
+      next.communication.brand = {...c.ui.state.data.communication.brand,...saved,updated_at:new Date().toISOString()};
+      return response(next);
+    });
+    await c.ui.saveForm({querySelector:()=>null,getAttribute:()=> 'brand-form',reportValidity:()=>true,values});
+    return saved;
+  };
+  // Saving a legacy record untouched keeps both choices off (unchecked boxes are absent from FormData).
+  const offSaved = await saveBrand(legacy,{description:'Grounded',audience:'Clients',voice:'Clear',avoid:'Hype',public_signature:'off'});
+  assert.equal(offSaved.public_signature,'off');
+  assert.strictEqual(offSaved.public_banner,false);
+  // Opting in saves and shows the saved values after reload.
+  const optIn = await saveBrand(legacy,{description:'Grounded',audience:'Clients',voice:'Clear',avoid:'Hype',public_signature:'full',public_banner:'on'});
+  assert.equal(optIn.public_signature,'full');
+  assert.strictEqual(optIn.public_banner,true);
+  assert.equal(legacy.calls.filter(call=>call.url === '/api/brand').length,2);
+  const reloaded = creditForm(legacy.ui.renderSetup());
+  assert.equal(reloaded.selected,'full','the saved signature shows after reload');
+  assert.equal(reloaded.checked,true,'the saved banner shows after reload');
+  // Opt-in values are retained when the rendered form is saved again without changes.
+  for (const [signature,banner] of [['compact',true],['full',false],['compact',false]]) {
+    const kept = creditSetup({description:'D',audience:'A',voice:'V',avoid:'X',updated_at:new Date().toISOString(),public_signature:signature,public_banner:banner});
+    const shown = creditForm(kept.ui.renderSetup());
+    assert.equal(shown.selected,signature);
+    assert.equal(shown.checked,banner);
+    const resubmitted = await saveBrand(kept,{description:'D',audience:'A',voice:'V',avoid:'X',public_signature:shown.selected,...(shown.checked ? {public_banner:'on'} : {})});
+    assert.equal(resubmitted.public_signature,signature,'saving the unchanged form retains the signature');
+    assert.strictEqual(resubmitted.public_banner,banner,'saving the unchanged form retains the banner');
+  }
+  assert.ok(legacy.calls.every(call=>call.url.startsWith('/')),'saving credit choices makes no outside request');
+  legacy.ui.settingsDialog();
+  assert.ok(legacy.html().includes('data-action="setup-identity"') && legacy.html().includes('Preferences: personal brand and RES credit'),'Settings links to the Preferences brand form and names the credit choice');
+  assert.ok(legacy.html().includes('>Settings &amp; data<') && legacy.html().includes('Save settings') && !legacy.html().includes('Save preferences') && !legacy.html().includes('A workspace that feels like you'),'the dialog is named Settings & data and saves with Save settings');
+  assert.match(legacy.ui.renderSetup(),/<h1>Preferences<\/h1>/,'the page is named Preferences');
+
+  // U5: an unrelated reload keeps unsaved Preferences edits and saves nothing; an explicit save shows the saved values and refocuses Save.
+  const pending = setup();
+  const resets = [];
+  const control = (id,props,defaults) => { const node = pending.get('#'+id); Object.assign(node,props); resets.push(() => Object.assign(node,defaults)); return node; };
+  control('brand-form',{},{});
+  const description = control('brand-description',{value:'Grounded and direct',defaultValue:'Grounded'},{value:'Grounded'});
+  const audience = control('brand-audience',{value:'Clients',defaultValue:'Clients'},{value:'Clients'});
+  const signatureField = control('brand-public-signature',{tagName:'SELECT',value:'compact',options:[{value:'off',defaultSelected:true},{value:'compact',defaultSelected:false}]},{value:'off'});
+  const bannerField = control('brand-public-banner',{type:'checkbox',checked:true,defaultChecked:false},{checked:false});
+  const savedNote = control('brand-saved-state',{textContent:'Saved a minute ago'},{textContent:'Saved a minute ago'});
+  let pageHtml = '';
+  // A redraw replaces every control with a fresh one holding the saved values.
+  Object.defineProperty(pending.get('#main'),'innerHTML',{get:() => pageHtml,set:value => {pageHtml = value;resets.forEach(restore => restore());}});
+  pending.ui.state.view = 'setup';
+  pending.setHandler(url => { if (url === '/api/state') return response(pending.data); throw new Error(`Unexpected ${url}`); });
+  assert.equal(await pending.ui.reload(),true);
+  assert.ok(pageHtml.includes('id="brand-form"'),'the page was redrawn from saved state');
+  assert.equal(description.value,'Grounded and direct','an unrelated reload keeps the typed brand text');
+  assert.equal(signatureField.value,'compact','an unsaved signature choice survives the reload');
+  assert.equal(bannerField.checked,true,'an unsaved banner choice survives the reload');
+  assert.equal(audience.value,'Clients','untouched fields still show saved state');
+  assert.ok(savedNote.textContent.includes('unsaved edits are kept'),'the kept edits are named');
+  assert.equal(pending.calls.filter(call => call.method && call.method !== 'GET').length,0,'a reload never saves the pending edits');
+  const saveControl = pending.get('#brand-save');
+  saveControl.focus = () => { saveControl.focused = true; };
+  const brandValues = {description:'Grounded and direct',audience:'Clients',voice:'Clear & warm',avoid:'Hype',public_signature:'compact'};
+  pending.setHandler(url => {
+    if (url === '/api/brand') return response({brand:brandValues});
+    const next = structuredClone(pending.data);
+    next.communication.brand = {...next.communication.brand,...brandValues,public_banner:true,updated_at:new Date().toISOString()};
+    return response(next);
+  });
+  await pending.ui.saveForm({querySelector:() => null,getAttribute:() => 'brand-form',reportValidity:() => true,values:{...brandValues,public_banner:'on'}});
+  assert.equal(pending.calls.filter(call => call.url === '/api/brand').length,1,'only the explicit save writes');
+  assert.equal(description.value,'Grounded','after a successful save the page shows freshly rendered saved state, not stale edits');
+  assert.equal(saveControl.focused,true,'focus returns to the Save control after a successful save');
+
+  // A successful PATCH followed by a failed state read must not poison later edits.
+  pending.setHandler(url => {
+    if (url === '/api/brand') return response({brand:brandValues});
+    throw new Error('Synthetic state refresh failure');
+  });
+  await pending.ui.saveForm({querySelector:() => null,getAttribute:() => 'brand-form',reportValidity:() => true,values:brandValues});
+  description.value = 'New words after the failed refresh';
+  pending.setHandler(() => response(pending.data));
+  assert.equal(await pending.ui.reload(),true);
+  assert.equal(description.value,'New words after the failed refresh','a failed post-save refresh cannot discard edits typed later');
+
+  // Retaining edits must still rescue focus when a different main-page control disappears.
+  const oldControl = element(), mainRegion = pending.get('#main');
+  pending.document.activeElement = oldControl;
+  mainRegion.contains = node => node === oldControl && pending.document.activeElement === oldControl;
+  mainRegion.focus = () => { pending.document.activeElement = mainRegion; };
+  pending.document.querySelector = selector => selector === '#today-status' ? null : pending.get(selector);
+  resets.push(() => { pending.document.activeElement = null; });
+  pending.ui.render();
+  assert.equal(description.value,'New words after the failed refresh');
+  assert.equal(pending.document.activeElement,mainRegion,'kept edits do not suppress the focus fallback');
+
+  // Import preview: public credit choices that would change are shown before confirmation.
+  const previewImport = async (current,communicationRecord,{schema=4,omit=false}={}) => {
+    const page = creditSetup({description:'D',audience:'A',voice:'V',avoid:'X',updated_at:new Date().toISOString(),...current});
+    const payload = {schema_version:schema,accounts:[],reviews:[],settings:{}};
+    if (!omit) payload.communication = communicationRecord;
+    const before = page.calls.length;
+    await page.ui.importFile({size:100,name:'synthetic.json',text:async()=>JSON.stringify(payload)});
+    assert.equal(page.calls.length,before,'previewing a backup makes no request');
+    return page;
+  };
+  const brandOf = (fields,extra={}) => ({brand:{description:'D',audience:'A',voice:'V',avoid:'X',updated_at:null,...fields},access:[],setup_requests:[],mail_syncs:[],messages:[],drafts:[],...extra});
+  const plain = page => page.html().replace(/<[^>]*>/g,' ').replace(/\s+/g,' ');
+  const offToFull = await previewImport({},brandOf({public_signature:'full',public_banner:true}));
+  assert.ok(offToFull.html().includes('confirm-import'),'the existing confirmation remains');
+  assert.ok(offToFull.html().includes('RES credit choices will change'));
+  assert.match(plain(offToFull),/Text signature: Off → Full — RES and project link/);
+  assert.match(plain(offToFull),/Banner: Off → On/);
+  assert.ok(offToFull.html().includes('guide future public drafts. They are not permission to publish.'));
+  assert.ok(!/type="checkbox"/.test(offToFull.html()),'no extra permission checkbox');
+  assert.ok(offToFull.html().indexOf('RES credit choices will change') < offToFull.html().indexOf('confirm-import'),'the notice precedes the confirmation button');
+  const onToOffOld = await previewImport({public_signature:'compact',public_banner:true},brandOf({}));
+  assert.match(plain(onToOffOld),/Text signature: Short — RES → Off/,'a backup without the fields means off');
+  assert.match(plain(onToOffOld),/Banner: On → Off/);
+  const bannerOnly = await previewImport({public_signature:'compact',public_banner:false},brandOf({public_signature:'compact',public_banner:true}));
+  assert.match(plain(bannerOnly),/Text signature: Short — RES → Short — RES/);
+  assert.match(plain(bannerOnly),/Banner: Off → On/);
+  for (const same of [[{},brandOf({})],[{},brandOf({public_signature:'off',public_banner:false})],[{public_signature:'full',public_banner:true},brandOf({public_signature:'full',public_banner:true})]]) {
+    const unchanged = await previewImport(...same);
+    assert.ok(unchanged.html().includes('confirm-import'));
+    assert.ok(!unchanged.html().includes('RES credit choices'),'unchanged choices add no notice');
+  }
+  for (const schema of [1,2,3]) {
+    const older = await previewImport({public_signature:'full',public_banner:true},brandOf({}),{schema});
+    assert.match(plain(older),/Text signature: Full — RES and project link → Off/,`format ${schema} also previews`);
+  }
+  const noCommunication = await previewImport({public_signature:'full',public_banner:true},null,{omit:true});
+  assert.ok(noCommunication.html().includes('confirm-import'));
+  assert.ok(!noCommunication.html().includes('RES credit choices'),'a backup without communication leaves preferences alone');
+  const malicious = '<img src=x onerror=alert(1)>';
+  for (const bad of [{public_signature:'loud'},{public_signature:malicious},{public_signature:null},{public_signature:['full']},{public_signature:{}},{public_banner:'true'},{public_banner:1},{public_banner:null}]) {
+    const refused = await previewImport({},brandOf(bad));
+    assert.ok(!refused.html().includes('confirm-import'),`invalid ${JSON.stringify(bad)} is refused`);
+    assert.ok(!refused.html().includes('RES credit choices'));
+    assert.ok(refused.get('#dialog-error').textContent.includes('public credit choices are not valid'));
+    assert.ok(!refused.get('#dialog-error').innerHTML.includes('<img'),'the invalid value is never echoed as markup');
+  }
+  for (const badCommunication of [{access:[]},{brand:null},{brand:[]},{brand:'x'},null]) {
+    const refused = await previewImport({},badCommunication);
+    assert.ok(!refused.html().includes('confirm-import'),'a communication record without a valid brand is refused');
+  }
+  // A hostile current value is never shown as given either.
+  const hostile = await previewImport({public_signature:malicious},brandOf({public_signature:'compact'}));
+  assert.ok(!hostile.html().includes('<img'));
+  assert.match(plain(hostile),/Text signature: Off → Short — RES/);
+  // Confirming still sends the file unchanged.
+  offToFull.setHandler(url => url === '/api/import' ? response({accounts:0,reviews:0}) : url === '/api/state' ? response(offToFull.data) : (()=>{throw new Error('Unexpected '+url);})());
+  await offToFull.ui.handleAction({dataset:{action:'confirm-import'},disabled:false,setAttribute(){},removeAttribute(){},isConnected:true});
+  const sentImport = offToFull.calls.find(call=>call.url === '/api/import');
+  assert.ok(sentImport,'the existing confirmation sends the import');
+  assert.equal(JSON.parse(sentImport.body).communication.brand.public_signature,'full');
 
   console.log('Communication UI renderer/handler checks passed (no browser or visual claim).');
 })().catch(error=>{console.error(error);process.exitCode=1;});

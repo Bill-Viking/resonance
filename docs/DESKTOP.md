@@ -1,71 +1,102 @@
 # Desktop candidate: build and use
 
-For the project-chat workflow in Codex or Claude Code, start with the [illustrated user manual](../static/guide/USING-RES.md).
+Download the [signed Windows x64 ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1/Resonance-0.1.0-rc.1-windows-x86_64-signed.zip), extract the entire folder, then open `Resonance.exe` inside it. Python is bundled. The Apple Silicon app is awaiting signing and notarization. On macOS, open the [source ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1/Resonance-0.1.0-rc.1-source.zip) as a local project in Codex or Claude Code. Running the dashboard from source requires Python 3.9 or later.
 
-A **candidate** is a self-contained Mac app or Windows folder that a person can open without installing Python, Node, a Terminal or Xcode. It is built by PyInstaller 6.22.3 in one-folder, windowed mode with no UPX compression, from an audited source export. Nothing here publishes, signs or notarizes anything.
+The app listens only on `127.0.0.1:4317`, makes no outgoing connections, holds no credentials and has no model inside. Its small window offers **Open Resonance** and **Quit**. Closing that window stops the local server and preserves saved data. Closing only the browser does not quit the app.
 
-The packaged app is the same Resonance: it listens only on `127.0.0.1:4317`, makes no outgoing connections, holds no credentials and has no model inside. A small window says **Resonance running** and offers **Open Resonance** and **Quit**. Closing the window stops the local server and keeps everything you saved. If the address is already used by another program, Resonance shows a plain message and the log location; it never stops or reuses the other program.
+## Build an unsigned candidate
 
-## What a candidate is, and is not
+Build natively on each target. The intended targets are macOS 13 or newer, separately for Apple silicon and Intel, and Windows 10 or newer on x86-64. These are build targets; minimum-OS compatibility still requires physical tests. PyInstaller does not cross-compile.
 
-| Stage | What it means | Status |
-| --- | --- | --- |
-| Source preview | `./resonance` or `resonance.bat` with Python installed | Exists today |
-| **Unsigned candidate** | The archive these steps produce. A Mac may ad-hoc sign the pieces on Apple silicon; that is not an identity | What this page builds |
-| Signed release | Mac: Developer ID signature and Apple notarization. Windows: Authenticode signature | Not built; needs the owner's credentials |
-| Physical first-user proof | A person on a real Mac and a real Windows computer unzips it, opens it, uses it, quits it, and their data is intact | Separate; a build or CI run is not this |
+Use ordinary, GIL-enabled CPython **3.14.10**, with Tcl/Tk 8.6 or newer. The
+builder records the Tcl patch level and Tk major and minor version. It records
+an exact Tk patch level when the Tk scripts declare it or the builder supplies
+an independently verified value with `--tk-patch-level`. Apple's system Python
+is unsuitable. A Python built for a newer macOS cannot prove compatibility
+with an older one merely by changing an environment variable.
 
-An unsigned candidate shows operating-system warnings (Gatekeeper on Mac, SmartScreen on Windows) and may need the person to confirm they trust it. Do not describe a candidate as "signed", "notarized" or "verified on Windows" until each is separately true.
+Create a new isolated build environment outside the checkout:
 
-## Build it
+```
+python3 tools/prepare_build.py --python /path/to/python3.14 --target macos-arm64 --out /path/to/build-venv
+```
 
-PyInstaller does not cross-compile. Build on the system you are building for: a Mac makes the Mac app and a Windows computer makes the Windows folder. A Mac cannot build `Resonance.exe`.
+Use `macos-x86_64` for Intel or `windows-x86_64` for Windows. On Windows, the selected interpreter and venv executable have Windows paths; the latter is `build-venv\Scripts\python.exe`. On Mac it is `build-venv/bin/python`. `--plan` inspects the target and locks without creating the environment.
 
-1. Install Python 3.11 that includes its own Tcl/Tk 8.6 or newer (the python.org installer does; some package-manager builds do not). Do not use Apple's system Python: it is linked to Apple's deprecated system Tcl/Tk 8.5, whose window can come up with blank labels, and the build tool refuses it. Check with `python3 -c "import tkinter; print(tkinter.TclVersion, tkinter.TkVersion)"`, which prints the versions without opening a window.
-2. Install the build tools into that Python. This is the only step that uses a package index, and it is for the builder, never the end user:
+The preparation step is a builder-only network operation. It installs exact, hash-verified wheels, including all build dependencies, from platform locks in `desktop/locks/`. It disables user configuration and inherited Python/pip injection settings, refuses an existing output folder and records both pip installation reports. Do not install build packages into the system Python or bypass the lock with `requirements-build.txt`.
 
-   ```
-   python3 -m pip install -r desktop/requirements-build.txt      # Windows: py -3 -m pip install -r desktop\requirements-build.txt
-   ```
+From a clean, committed source checkout, make an audited export outside the checkout. Replace the example version with the exact value in `VERSION`:
 
-3. Make an audited export outside the working checkout. This commits nothing to your repository and pushes nothing:
+```
+/path/to/build-venv/bin/python -I -B tools/make_release.py --version 0.1.0-rc.1 --out /path/to/runtime
+```
 
-   ```
-   python3 tools/make_release.py --version "$(cat VERSION)" --out /path/to/runtime
-   ```
+Developer note: `.gitattributes` pins text to LF on checkout (`* text=auto eol=lf`) so native and export builds see the same bytes whatever a developer's `core.autocrlf` is, and the exporter's isolated status check stays clean on Windows. Git's binary detection and `THIRD-PARTY-NOTICES.txt` (`-text`) remain byte-exact. Global Git configuration is not changed.
 
-4. Look at what will happen. `--plan` verifies the export and prints the native command without writing anything:
+The exporter runs the public copy's Python and seven Node suites. It constructs fresh synthetic Git history with isolated Git configuration and checks the committed tree against the manifest. Review the exported file-list difference before distribution; broad public source directories still need human review.
 
-   ```
-   python3 tools/build_desktop.py --runtime /path/to/runtime --out /path/to/candidate --plan
-   ```
+Inspect and then build the native candidate using that same venv:
 
-5. Build. `--out` must not exist yet:
+```
+/path/to/build-venv/bin/python -I -B tools/build_desktop.py --runtime /path/to/runtime --out /path/to/candidate --plan
+/path/to/build-venv/bin/python -I -B tools/build_desktop.py --runtime /path/to/runtime --out /path/to/candidate
+```
 
-   ```
-   python3 tools/build_desktop.py --runtime /path/to/runtime --out /path/to/candidate
-   ```
+The output must be new and outside both the checkout and runtime. The tool verifies every release-manifest entry and refuses internal files, links, unlisted files, changed bytes and missing required files. It stages only verified bytes. It checks the venv's exact package set, wheel-install evidence and lock hashes, then runs PyInstaller with `-E -s` from an empty working directory and a sanitized environment.
 
-The tool refuses to run, and writes nothing, when the runtime is the source working checkout, has no valid `RELEASE-MANIFEST.json`, lists or contains a private or internal file, an unlisted file, a symbolic link or an unsafe path, or has any file whose size or SHA-256 differs from the manifest; and when `--out` already exists or is inside the runtime or the source checkout. It also stops if PyInstaller or tzdata is not the pinned version, Tk is missing, or the Tcl or the Tk this Python is linked to is older than 8.6.
+The output contains the native app under `dist/`, a candidate ZIP and `BUILD-MANIFEST.json`. The manifest records the source manifest digest, full Python build, native architecture, intended minimum OS, Tcl/Tk version evidence, complete pip freeze, wheel-install evidence, self-test result and file/archive hashes. An unsigned manifest is evidence for that unsigned archive only. Signing changes bytes and requires a new final manifest.
 
-Only verified files are copied into a temporary staging folder: the modules, `static/`, the practice seed in `examples/`, `VERSION`, `LICENSE`, `README.md`, `ASSISTANT.md` and the other public documents. The Python modules are frozen into the app, including the ones loaded by name at run time (`server`, which `samples.Workspace` imports for the store). The same source files also ship as data beside them, only because the assistant commands (`python3 monitor.py …`) run from the app's data root. Tests, tools, workflows and the staging folder are not shipped, and no private value is frozen into configuration. On a Mac the existing `static/icon.svg` is rendered to an icon with the repository's own `mac-launcher/render-icon.swift` (`--no-mac-icon` skips it). On Windows pass an existing `.ico` with `--icon`; there is no converter, so without one the default icon is used.
+The build requires a regular `THIRD-PARTY-NOTICES.txt` at
+`Resonance.app/Contents/Resources/THIRD-PARTY-NOTICES.txt` on Mac or
+`Resonance/_internal/THIRD-PARTY-NOTICES.txt` on Windows. Its bytes must match the
+verified export. The manifest's `third_party_notices` entry records the path,
+SHA-256 and byte count from that check. The source catalog at
+`desktop/third-party-sources.json` records the length and hash of each upstream
+notice. Review each native build's dependency inventory against that catalog
+before distribution. Mac bundle versions and minimum OS are
+set before the ad-hoc signature is renewed and verified. Windows receives a version
+resource and a default icon made from the existing verified Reader icon;
+`--icon` can supply an override. Physical Windows metadata and icon display still
+need native inspection.
 
-The result in `--out`:
+The built executable performs a headless smoke check against temporary synthetic
+data, with its logs and JSON report also in temporary folders. It imports
+`tkinter`, starts a Tcl interpreter with `tkinter.Tcl()` and records `tcl: true`
+and the exact `tcl_patch`. It also serves the page, checks the assistant prompt
+and checks time-zone support before stopping. The file report works even when
+a Windows windowed executable has no stdout. Tk widgets, browser behavior,
+VoiceOver and NVDA require separate native checks.
 
-- `dist/Resonance.app` (Mac) or `dist/Resonance/Resonance.exe` with its `_internal` folder (Windows)
-- `Resonance-<version>-<mac|windows>-<architecture>-candidate.zip`, with paths preserved (made with `ditto` on Mac)
-- `BUILD-MANIFEST.json`: source version, OS and architecture, Python, PyInstaller, tzdata, Tcl and Tk versions (so the toolkit a candidate was built with can be audited), the SHA-256 and size of every file in `dist/`, and the archive's SHA-256
+The Mac build checks ZIP metadata before writing the candidate manifest. It
+accepts ditto's provenance-only AppleDouble sidecars. Quarantine and other
+unsupported metadata fail the build. The ZIP and partial build output stay
+available for diagnosis.
 
-Before it writes the archive, the tool runs the built program once with no window, against a throwaway synthetic data folder: `Resonance --self-test --data-dir <temp> --port 0` starts the server, requests the page from this computer, loads a time zone and checks the practice seed. The same command can be used by hand. It never opens a window or a browser.
+## Open and quit
 
-## Use it
+Choose **Using RES in Codex or Claude Code** at the bottom of any workspace page for the illustrated
+user manual. It opens in a separate tab so you can keep your place in RES.
 
-Unzip, then open `Resonance.app` (Mac) or `Resonance.exe` (Windows). The browser opens at `http://127.0.0.1:4317`. **Open Resonance** opens it again; **Quit** or closing the window stops it. Your data stays in the folder named in the README (`~/Library/Application Support/Resonance` on a Mac, `%LOCALAPPDATA%\Resonance` on Windows), outside the app, so replacing the app never touches it.
+On Mac, unzip the candidate, move **Resonance.app** to Applications, then open it there. The launcher refuses a translocated Mac app before binding or touching saved data and explains the move. On Windows, extract the entire folder before opening **Resonance.exe**; keep its accompanying files together.
 
-The launcher's own log is `~/Library/Logs/Resonance/launcher.log` on a Mac and `%LOCALAPPDATA%\Resonance Launcher\launcher.log` on Windows. It records short events (started, stopped, the kind of error) and never post text, account names, request bodies or credentials.
+An unsigned candidate has not passed Developer ID/notarization or Authenticode checks. Candidate testing does not establish signed-download behavior or first-user readiness. Do not remove quarantine or weaken operating-system protections as a release procedure.
 
-The assistant's `python3 monitor.py …` commands run with the assistant's own Python, from the app's internal data root, whose path is named in the prompt Resonance offers for your assistant. The packaged app itself needs no Python.
+If port 4317 is occupied, the app leaves the other listener alone and shows a message. An earlier source launcher may have left a background copy running without a window. The new source launcher has an ownership-checked stop command; see [its instructions](../mac-launcher/README.md). It cannot adopt or stop an unknown older process. An operating-system denial or reserved port has a different message. Port 4317 is retained deliberately because the Reader's local host permission uses it; changing it requires a coordinated app and Reader update.
 
-## CI
+Your saved data stays in the location described in the [README](../README.md), outside the app. The launcher's bounded event log is `~/Library/Logs/Resonance/launcher.log` on Mac or `%LOCALAPPDATA%\Resonance Launcher\launcher.log` on Windows. It records event words and error types, never saved text, account names, request bodies or credentials.
 
-`.github/workflows/desktop-candidate.yml` is started by hand (`workflow_dispatch`) and nothing else. On `macos-latest` and `windows-latest` with Python 3.11 it installs the build tools, runs the Python suite and all seven Node suites, makes the allowlisted export (which runs the export's own suites), checks the plan, builds natively and uploads the archive and `BUILD-MANIFEST.json` as workflow artifacts for 14 days. It creates no release, uses no secrets or signing identity and publishes nothing. A green run is build evidence only, not physical Windows or Mac proof.
+## Assistant files
+
+The packaged app verifies its public assistant files against an embedded manifest and copies them to a stable per-user folder: `~/Library/Application Support/Resonance Assistant` on Mac or `%LOCALAPPDATA%\Resonance Assistant` on Windows. Each version has a directory named with the full manifest digest. The prompt gives that exact path. The kit contains public code and documentation only; no saved workspace is copied.
+
+Existing kits are verified before reuse and never overwritten if changed. Repositories, recognized cloud locations, data folders and symlink destinations are refused. Verification failures produce a repair message. `monitor.py` disables bytecode writes before importing local modules. The external assistant still needs its own Python; the packaged app does not.
+
+Signed-resource integrity after an assistant command and behavior on a quarantined download remain native acceptance checks.
+
+## CI and release evidence
+
+The manual `desktop-candidate.yml` workflow uses pinned action commits, CPython 3.14.10 and Node 24. It builds on explicit Apple silicon, Intel and Windows x86-64 runners, uses the locked venv, runs all suites, tests the audited export and uploads unsigned candidate evidence. It uses no signing credentials and publishes no release. A green build is not physical platform, screen-reader or independent-user proof. Developers: `tools/make_release.py` bounds each exported test command to five minutes, except the native Windows Python suite, which has fifteen; a failed or timed-out check prevents the release commit and tag.
+
+A signed release must verify the exact unsigned input, sign and verify it, remove signing-key access before running its self-test, then on Mac notarize and staple it. Only afterward may it create the distribution archive and final hashes. All signing, native-install, Reader-store, accessibility, independent-user and combined-source review gates remain separate.
+
+The staged commands and their checkpoint requirements are in [Signing](SIGNING.md).

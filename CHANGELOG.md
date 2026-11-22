@@ -1,6 +1,57 @@
 # Changes
 
-## Unreleased
+## 0.1.0-rc.1 — source and Windows release candidate
+
+- The illustrated user manual starts with opening RES as a project in Codex
+  or Claude Code and drafting directly in chat. The dashboard and notification
+  examples follow. The guide also opens from the workspace footer.
+- An interrupted single-image post can resume with the last image the user
+  picked. The assistant kit records separate receipts for Instagram, X and
+  Facebook and requires a destination check before retrying.
+- Social inbox assistance prepares a one-time request to triage notifications
+  or draft a reply for one conversation. The local workspace keeps summaries
+  and editable reply drafts in the current tab.
+- The Facebook authoring and edit instructions distinguish a linked @mention
+  in the caption from an “is with” header or a tag on a photo.
+
+- Public RES branding is opt-in. Preferences saves an optional text signature
+  and approved-banner request, both off by default. The assistant reads these
+  choices through the profile command; nothing is added automatically.
+- Existing brand profiles and older backups without these fields read as off.
+  Import previews show changes to public credit before confirmation.
+- Database schema 7 protects the new preferences with a version barrier and a
+  pre-upgrade snapshot. Older editions refuse upgraded workspaces with a newer-
+  version message. Backups use format 4; formats 1–3 remain importable. Older
+  editions reject format 4, so restore new backups with this edition or newer.
+- Welcome has one main paste action; Today, Posts and Compose form the primary
+  navigation. Secondary features remain visible. Today gives attention and the
+  next action priority over reports and empty panels. Paste routes preserve the
+  text-first account walk; unsaved Preferences edits survive unrelated refreshes.
+- Dialog dismissal asks before discarding unsaved writing and ignores drags that
+  end outside the dialog. Request details escape imported blocker text.
+- A fresh Check click can reconnect an idle reader. Long YouTube comment lists
+  have bounded, consistent coverage; imported receipts are labelled and sorted
+  by completion time. Reader scope and possible provider side effects are stated.
+- A secondary Choose a review control offers Work Safe, Privacy Check, Voice &
+  Tone and Before You Post without replacing the main paste action. Assistant
+  reviews require a social account and scope; preparing a request starts nothing.
+- Facebook assistant checks enumerate own Activity Log comments and replies,
+  including those on other people's posts, and reconcile each discovered item
+  against its exact review. Loading, unsupported rows and unfinished review stay
+  visible as coverage gaps. The production reader still has no Facebook support.
+- Coverage ledgers bind each account and review run to its discovery inventory.
+  Facebook comment/reply checks require that inventory; an empty inventory cannot
+  count as complete. Older ledgers need explicit binding metadata, preserving
+  their saved targets and outcomes. App database and backup formats are unaffected.
+- Exact Facebook comment identity checks distinguish the comment's author from
+  the owner of the parent post, while retaining fresh identity and action guards.
+- Desktop assistant kits include the verified Work Safe procedure and discovery
+  helpers. These tools do not read credentials, run background checks or change
+  a platform.
+- macOS signing checkpoints bind file and directory permissions. Bundle contents
+  remain readable by another local user; altered modes fail later checks, while
+  staging files and signing secrets keep private permissions.
+- The source ZIP opens as a project in Codex or Claude Code. The signed Windows x64 ZIP passed a clean Windows Sandbox launch. Apple signing and notarization are pending for the standalone Mac app.
 
 ## 0.1.0-preview.8 — source preview
 

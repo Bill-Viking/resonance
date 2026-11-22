@@ -1,10 +1,15 @@
 ---
 name: resonance
-description: Run the user's Resonance check, bring their own posts and comments into Resonance, or carry out an edit or deletion they asked for there. Use when the user mentions Resonance, says "run my Resonance check", or asks what they have said online and how it may land.
+description: Use Resonance for the user's own public writing: prepare a new post or reply, run a check, bring in their posts, or handle an edit or deletion they requested. Route drafting and attribution to AUTHORING.md; account checks and existing-post actions use ASSISTANT.md.
 ---
 
 # Resonance
 
-The contract for this work is `ASSISTANT.md`, at the root of the Resonance folder this skill came with. Read it in full before you do anything, then follow it exactly. This file adds nothing to it and overrides nothing in it.
+Start with the requested work, using the files at the root of the Resonance folder this skill came with:
 
-If you cannot find `ASSISTANT.md`, stop and ask the user where their Resonance folder is. Never work from memory of an earlier version.
+- For a new public post, reply, artwork or attribution choice, read `AUTHORING.md` in full first. Preparing a draft does not authorize publication.
+- For an account check, bringing in posts, or an edit or deletion of an existing post, read `ASSISTANT.md` in full first and follow it exactly.
+
+The selected file is the contract; this skill adds no publication or account authority and overrides neither file. Before browser work, follow its browser-selection and sign-in guidance using the tools actually available in this session.
+
+If the required contract is missing, stop and ask where the Resonance folder is. Never substitute a remembered version or another installed runtime's contract.

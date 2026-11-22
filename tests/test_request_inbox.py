@@ -410,7 +410,7 @@ class BackupTests(Base):
     def test_export_is_portable_readable_json_without_computed_fields(self):
         self.intake(item(self.account))
         backup = self.store.backup()
-        self.assertEqual(backup['schema_version'], 3)
+        self.assertEqual(backup['schema_version'], 4)
         exported = backup['request_inbox']
         self.assertEqual(len(exported), 1)
         self.assertTrue(set(exported[0]) == server.INBOX_FIELDS)
@@ -502,7 +502,7 @@ class BackupTests(Base):
 
 class MigrationTests(Base):
     def test_schema_four_database_upgrades_with_a_backup_and_keeps_everything(self):
-        self.assertEqual(len(server.MIGRATIONS), 6)
+        self.assertEqual(len(server.MIGRATIONS), 7)
         with self.store.connect() as db:
             db.execute('DROP TABLE request_inbox')
             db.execute('PRAGMA user_version=4')
@@ -512,7 +512,7 @@ class MigrationTests(Base):
             server.Store(self.directory, read_only=True).inbox_snapshot()
         upgraded = server.Store(self.directory)
         with upgraded.connect() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 6)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 7)
             self.assertEqual(db.execute('SELECT count(*) FROM request_inbox').fetchone()[0], 0)
             after = {name: [tuple(row) for row in db.execute('SELECT * FROM "' + name + '"')] for name in tables}
         self.assertEqual(after, before)

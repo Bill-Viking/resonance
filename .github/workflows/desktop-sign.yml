@@ -1,0 +1,564 @@
+name: Desktop Mac signing
+# Manual evidence only. Keep the two credential environments and the execution job separate.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful Desktop candidate workflow run ID for this exact commit
+        required: true
+        type: string
+      candidate_artifact:
+        description: Explicit unsigned artifact name
+        required: true
+        type: choice
+        options:
+          - resonance-candidate-macos-arm64
+          - resonance-candidate-macos-x86_64
+      archive_sha256:
+        description: Independently reviewed candidate ZIP SHA-256
+        required: true
+        type: string
+      manifest_sha256:
+        description: Independently reviewed BUILD-MANIFEST.json SHA-256
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.event.repository.private == true &&
+      github.ref_type == 'branch' && github.ref_protected &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      github.workflow_sha == github.sha &&
+      github.workflow_ref == format('{0}/.github/workflows/desktop-sign.yml@{1}', github.repository, github.ref)
+    runs-on: &native_runner ${{ inputs.candidate_artifact == 'resonance-candidate-macos-x86_64' && 'macos-15-intel' || 'macos-15' }}
+    environment: resonance-signing
+    timeout-minutes: 30
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      carrier_sha256: ${{ steps.pack.outputs.carrier_sha256 }}
+      checkpoint: ${{ steps.pack.outputs.checkpoint }}
+      signed_tree_sha256: ${{ steps.anchor.outputs.signed_tree_sha256 }}
+      signing_identity: ${{ steps.anchor.outputs.signing_identity }}
+      signing_team_id: ${{ steps.anchor.outputs.signing_team_id }}
+    permissions:
+      contents: read
+      actions: read
+    defaults: &bash_defaults
+      run:
+        shell: bash
+    steps:
+      - name: Verify workflow and candidate run provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.candidate_run_id }}
+          ARTIFACT: ${{ inputs.candidate_artifact }}
+          ARCHIVE_SHA: ${{ inputs.archive_sha256 }}
+          MANIFEST_SHA: ${{ inputs.manifest_sha256 }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+          REPO_ID: ${{ github.event.repository.id }}
+        run: |
+          set -eu
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ && "$ARCHIVE_SHA" =~ ^[a-f0-9]{64}$ && "$MANIFEST_SHA" =~ ^[a-f0-9]{64}$ ]]
+          case "$ARTIFACT" in
+            resonance-candidate-macos-arm64|resonance-candidate-macos-x86_64) ;;
+            *) exit 1 ;;
+          esac
+          run="$(gh api --hostname github.com "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
+          printf '%s' "$run" | jq -e --arg repo "$REPO_ID" --arg sha "$WORKFLOW_SHA" --arg branch "$BRANCH" '
+            (.repository.id | tostring) == $repo and (.head_repository.id | tostring) == $repo
+            and .head_sha == $sha and .head_branch == $branch
+            and .path == ".github/workflows/desktop-candidate.yml"
+            and .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success"
+          ' >/dev/null
+      - &trusted_checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - &prepare_work
+        name: Check the trusted checkout and prepare a private workspace
+        env:
+          ARTIFACT: ${{ inputs.candidate_artifact }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          case "$ARTIFACT" in
+            resonance-candidate-macos-arm64) expected=arm64 ;;
+            resonance-candidate-macos-x86_64) expected=x86_64 ;;
+            *) exit 1 ;;
+          esac
+          test "$(/usr/bin/uname -m)" = "$expected"
+          mkdir -m 700 "$RUNNER_TEMP/resonance-work"
+          mkdir -m 700 "$RUNNER_TEMP/resonance-work/carrier"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate_run_id }}
+          name: ${{ inputs.candidate_artifact }}
+          path: ${{ runner.temp }}/resonance-work/unsigned
+      - name: Stage verified bytes without executing candidate code
+        id: verify
+        env:
+          ARCHIVE_SHA: ${{ inputs.archive_sha256 }}
+          MANIFEST_SHA: ${{ inputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$RUNNER_TEMP/resonance-work"
+          shopt -s nullglob
+          archives=("$work"/unsigned/*.zip)
+          test "${#archives[@]}" -eq 1
+          checkpoint="$(/usr/bin/python3 -I -B "$GITHUB_WORKSPACE/tools/sign_release.py" verify --out "$work/stage" \
+            --archive "${archives[0]}" --manifest "$work/unsigned/BUILD-MANIFEST.json" \
+            --archive-sha256 "$ARCHIVE_SHA" --manifest-sha256 "$MANIFEST_SHA")"
+          [[ "$checkpoint" =~ ^[a-f0-9]{64}$ ]]
+          printf 'checkpoint=%s\n' "$checkpoint" >> "$GITHUB_OUTPUT"
+      - &prepare_keychain
+        name: Prepare disposable keychain cleanup
+        run: |
+          set -euo pipefail
+          umask 077
+          # Fresh runner VMs can have the same absolute runner temp path.
+          # Keep the notary keychain distinct from the recorded signing path.
+          [[ "$GITHUB_JOB" =~ ^(sign|notarize)$ ]]
+          auth="$RUNNER_TEMP/resonance-auth-$GITHUB_JOB"
+          mkdir -m 700 "$auth"
+          cat > "$auth/keychain.py" <<'PY'
+          import json
+          from pathlib import Path
+          import shlex
+          import subprocess
+          import sys
+
+          root = Path(__file__).resolve().parent
+          keychain = root / 'temporary.keychain-db'
+          snapshot = root / 'original.json'
+          inputs = ('certificate.p12', 'certificate.pem', 'key.pem', 'notary.p8')
+
+          def security(*args):
+              return subprocess.run(
+                  ['/usr/bin/security', *args], check=True, timeout=20,
+                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                  text=True,
+              ).stdout
+
+          def keychains(command):
+              return shlex.split(security(command, '-d', 'user'))
+
+          def restore():
+              original = json.loads(snapshot.read_text())
+              security('list-keychains', '-d', 'user', '-s', *original['search'])
+              if (keychains('list-keychains') != original['search']
+                      or keychains('default-keychain') != original['default']):
+                  raise RuntimeError('Keychain settings did not return to their original values.')
+
+          def create():
+              original = {'search': keychains('list-keychains'), 'default': keychains('default-keychain')}
+              if len(original['default']) != 1 or not Path(original['default'][0]).is_file():
+                  raise RuntimeError('Expected an existing user default keychain.')
+              pending = root / 'original.pending'
+              pending.write_text(json.dumps(original))
+              pending.replace(snapshot)
+              try:
+                  security('create-keychain', '-p', '', str(keychain))
+              finally:
+                  restore()
+
+          def cleanup():
+              failures = []
+              for name in inputs:
+                  try:
+                      (root / name).unlink(missing_ok=True)
+                  except OSError as exc:
+                      failures.append(exc)
+              if keychain.exists() or keychain.is_symlink():
+                  try:
+                      security('delete-keychain', str(keychain))
+                      if keychain.exists() or keychain.is_symlink():
+                          raise RuntimeError('Temporary keychain still exists.')
+                  except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
+                      failures.append(exc)
+              if snapshot.exists():
+                  try:
+                      restore()
+                  except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as exc:
+                      failures.append(exc)
+              if failures:
+                  raise RuntimeError('Could not clean up temporary keychain or credential inputs.')
+
+          try:
+              {'create': create, 'cleanup': cleanup}[sys.argv[1]]()
+          except (OSError, subprocess.SubprocessError, RuntimeError, ValueError):
+              sys.exit('Disposable keychain operation failed; check runner cleanup.')
+          PY
+      - name: Sign the verified stage
+        id: phase
+        timeout-minutes: 25
+        env:
+          CHECKPOINT: ${{ steps.verify.outputs.checkpoint }}
+          MAC_CERTIFICATE_P12_BASE64: ${{ secrets.MAC_CERTIFICATE_P12_BASE64 }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          MAC_SIGNING_IDENTITY: ${{ vars.MAC_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          auth="$(cd "$RUNNER_TEMP/resonance-auth-$GITHUB_JOB" && pwd -P)"
+          cleanup() {
+            local status=$?
+            unset MAC_CERTIFICATE_P12_BASE64 MAC_CERTIFICATE_PASSWORD
+            /usr/bin/python3 -I -B "$auth/keychain.py" cleanup || status=1
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          [[ "$CHECKPOINT" =~ ^[a-f0-9]{64}$ && "$MAC_SIGNING_IDENTITY" =~ ^[a-fA-F0-9]{40}$ ]]
+          test -n "$MAC_CERTIFICATE_PASSWORD"
+          /usr/bin/python3 -I -B - "$auth/certificate.p12" <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+          import sys
+
+          try:
+              data = base64.b64decode(''.join(os.environ['MAC_CERTIFICATE_P12_BASE64'].split()), validate=True)
+              if not data:
+                  raise ValueError
+              with Path(sys.argv[1]).open('xb') as target:
+                  target.write(data)
+          except (OSError, ValueError):
+              sys.exit('Could not decode the signing certificate.')
+          PY
+          unset MAC_CERTIFICATE_P12_BASE64
+          if ! /usr/bin/openssl pkcs12 -in "$auth/certificate.p12" -passin env:MAC_CERTIFICATE_PASSWORD \
+            -clcerts -nokeys -out "$auth/certificate.pem" </dev/null >/dev/null 2>&1 ||
+             ! /usr/bin/openssl pkcs12 -in "$auth/certificate.p12" -passin env:MAC_CERTIFICATE_PASSWORD \
+            -nocerts -nodes -out "$auth/key.pem" </dev/null >/dev/null 2>&1; then
+            printf '%s\n' 'Could not read the signing certificate or key.' >&2
+            exit 1
+          fi
+          unset MAC_CERTIFICATE_PASSWORD
+          /usr/bin/python3 -I -B "$auth/keychain.py" create
+          keychain="$auth/temporary.keychain-db"
+          if ! /usr/bin/security import "$auth/key.pem" -k "$keychain" -T /usr/bin/codesign </dev/null >/dev/null 2>&1 ||
+             ! /usr/bin/security import "$auth/certificate.pem" -k "$keychain" -T /usr/bin/codesign </dev/null >/dev/null 2>&1 ||
+             ! /usr/bin/security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k '' "$keychain" </dev/null >/dev/null 2>&1; then
+            printf '%s\n' 'Could not provision the temporary signing keychain.' >&2
+            exit 1
+          fi
+          rm "$auth/certificate.p12" "$auth/certificate.pem" "$auth/key.pem"
+          checkpoint="$(/usr/bin/python3 -I -B "$GITHUB_WORKSPACE/tools/sign_release.py" sign \
+            --out "$RUNNER_TEMP/resonance-work/stage" --state-sha256 "$CHECKPOINT" \
+            --identity "$MAC_SIGNING_IDENTITY" --keychain "$keychain")"
+          [[ "$checkpoint" =~ ^[a-f0-9]{64}$ ]]
+          printf 'checkpoint=%s\n' "$checkpoint" >> "$GITHUB_OUTPUT"
+      - &cleanup_keychain
+        name: Always remove the temporary keychain and credential inputs
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          auth="$RUNNER_TEMP/resonance-auth-$GITHUB_JOB"
+          if [[ -f "$auth/keychain.py" ]]; then
+            /usr/bin/python3 -I -B "$auth/keychain.py" cleanup
+          fi
+          rm -rf -- "$auth"
+      - name: Export the independent SIGN anchor after cleanup
+        id: anchor
+        env:
+          CHECKPOINT: ${{ steps.phase.outputs.checkpoint }}
+        run: |
+          set -euo pipefail
+          [[ "$CHECKPOINT" =~ ^[a-f0-9]{64}$ ]]
+          anchor="$(/usr/bin/python3 -I -B "$GITHUB_WORKSPACE/tools/sign_release.py" signed-anchor \
+            --out "$RUNNER_TEMP/resonance-work/stage" --state-sha256 "$CHECKPOINT")"
+          signed_tree="$(jq -er '.tree_sha256' <<< "$anchor")"
+          identity="$(jq -er '.identity' <<< "$anchor")"
+          team="$(jq -er '.team_id' <<< "$anchor")"
+          [[ "$signed_tree" =~ ^[a-f0-9]{64}$ && "$identity" =~ ^[A-F0-9]{40}$ && "$team" =~ ^[A-Z0-9]{10}$ ]]
+          printf 'signed_tree_sha256=%s\nsigning_identity=%s\nsigning_team_id=%s\n' \
+            "$signed_tree" "$identity" "$team" >> "$GITHUB_OUTPUT"
+      - &pack_stage
+        name: Pack the stage and record the carrier digest and checkpoint
+        id: pack
+        env:
+          CHECKPOINT: ${{ steps.phase.outputs.checkpoint }}
+          PHASE_JOB: ${{ github.job }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$CHECKPOINT" =~ ^[a-f0-9]{64}$ ]]
+          work="$RUNNER_TEMP/resonance-work"
+          [[ "$PHASE_JOB" =~ ^(sign|self_test)$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          carrier="$work/carrier/$PHASE_JOB-stage-$GITHUB_RUN_ATTEMPT.zip"
+          [[ ! -e "$carrier" && ! -L "$carrier" ]]
+          if ! /usr/bin/ditto -c -k --keepParent --sequesterRsrc "$work/stage" "$carrier" </dev/null >/dev/null 2>&1; then
+            printf '%s\n' 'Could not pack the signing stage carrier.' >&2
+            exit 1
+          fi
+          digest="$(/usr/bin/shasum -a 256 < "$carrier")"
+          digest="${digest%% *}"
+          [[ "$digest" =~ ^[a-f0-9]{64}$ ]]
+          printf 'carrier_sha256=%s\ncheckpoint=%s\n' "$digest" "$CHECKPOINT" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          path: ${{ runner.temp }}/resonance-work/carrier/sign-stage-${{ github.run_attempt }}.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+  self_test:
+    needs: sign
+    runs-on: *native_runner
+    timeout-minutes: 10
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      carrier_sha256: ${{ steps.pack.outputs.carrier_sha256 }}
+      checkpoint: ${{ steps.pack.outputs.checkpoint }}
+    defaults: *bash_defaults
+    steps:
+      - *trusted_checkout
+      - *prepare_work
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.sign.outputs.artifact_id }}
+          path: ${{ runner.temp }}/resonance-work/carrier
+          skip-decompress: true
+      - name: Verify and restore the signed stage from this run
+        env:
+          CARRIER_SHA: ${{ needs.sign.outputs.carrier_sha256 }}
+        run: &restore_stage |
+          set -euo pipefail
+          umask 077
+          [[ "$CARRIER_SHA" =~ ^[a-f0-9]{64}$ ]]
+          work="$RUNNER_TEMP/resonance-work"
+          shopt -s nullglob dotglob
+          carriers=("$work"/carrier/*)
+          test "${#carriers[@]}" -eq 1
+          carrier="${carriers[0]}"
+          [[ -f "$carrier" && ! -L "$carrier" ]]
+          digest="$(/usr/bin/shasum -a 256 < "$carrier")"
+          test "${digest%% *}" = "$CARRIER_SHA"
+          [[ ! -e "$work/stage" && ! -L "$work/stage" ]]
+          # Constrain the incoming archive before native extraction, including
+          # the handoff from the job that ran the candidate.
+          /usr/bin/python3 -I -B - "$GITHUB_WORKSPACE/tools/sign_release.py" "$carrier" <<'PY'
+          from pathlib import Path
+          import runpy
+          import stat
+          import sys
+          import unicodedata
+          import zipfile
+
+          tool = runpy.run_path(sys.argv[1])
+          carrier = Path(sys.argv[2])
+          prefix = 'stage/dist/'
+          state = 'stage/' + tool['STATE']
+          files, links, dirs, seen, sidecars, metadata_dirs = set(), {}, set(), set(), set(), set()
+
+          def require(condition):
+              if not condition:
+                  raise ValueError
+
+          try:
+              raw = tool['regular_bytes'](carrier, tool['MAX_ZIP'] + tool['MAX_JSON'])
+              with tool['candidate_zip'](raw, 2 * tool['MAX_ENTRIES']) as bundle:
+                  tool['check_mac_zip_headers'](bundle)
+                  members = bundle.infolist()
+                  require(len(members) <= 2 * tool['MAX_ENTRIES'])
+                  require(sum(i.file_size for i in members) <= tool['MAX_TREE'] + 32 * 1024 * 1024)
+                  for info in members:
+                      name = info.filename.removesuffix('/')
+                      tool['path_parts'](name)
+                      normalized = unicodedata.normalize('NFD', name.casefold())
+                      mode = info.external_attr >> 16
+                      kind = stat.S_IFMT(mode)
+                      require(info.orig_filename == info.filename and normalized not in seen
+                              and info.create_system == 3 and not mode & 0o7000
+                              and info.compress_type in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}
+                              and not info.flag_bits & ~0x808
+                              and info.is_dir() == (kind == stat.S_IFDIR))
+                      seen.add(normalized)
+                      metadata = tool['mac_zip_metadata'](bundle, info, name, kind)
+                      if metadata is not None:
+                          target, sidecar = metadata
+                          if sidecar:
+                              require(target not in sidecars)
+                              sidecars.add(target)
+                          else:
+                              metadata_dirs.add(target)
+                          continue
+                      with bundle.open(info) as entry:  # Also check the local header name.
+                          if info.is_dir():
+                              require(info.file_size == 0 and info.CRC == 0)
+                          if name in {'stage', 'stage/dist'}:
+                              require(info.is_dir() and stat.S_IMODE(mode) == 0o700)
+                          elif name == state:
+                              require(kind == stat.S_IFREG and stat.S_IMODE(mode) == 0o600
+                                      and 0 < info.file_size <= tool['MAX_JSON'])
+                          elif name.startswith(prefix):
+                              rel = name.removeprefix(prefix)
+                              tool['check_mac_bundle_mode'](mode)
+                              if kind == stat.S_IFDIR:
+                                  dirs.add(rel)
+                              elif kind == stat.S_IFLNK:
+                                  require(info.file_size <= 4096)
+                                  links[rel] = entry.read().decode()
+                              else:
+                                  require(kind == stat.S_IFREG)
+                                  files.add(rel)
+                          else:
+                              raise ValueError
+                  require({'stage', 'stage/dist', state.casefold()} <= seen)
+                  require(dirs == tool['layout'](files, links, dirs, 'darwin'))
+                  tree_dirs = {'stage', 'stage/dist'} | {prefix + rel for rel in dirs}
+                  require(metadata_dirs <= {''} | tree_dirs)
+                  require(sidecars <= tree_dirs | {state} | {prefix + rel for rel in files | links.keys()})
+          except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, tool['SigningError']):
+              sys.exit('Invalid signing stage carrier.')
+          PY
+          if ! /usr/bin/ditto -x -k "$carrier" "$work" </dev/null >/dev/null 2>&1; then
+            printf '%s\n' 'Could not restore the checked signing stage carrier.' >&2
+            exit 1
+          fi
+          rm "$carrier"
+      - name: Execute only the signed headless self-test
+        id: phase
+        env:
+          CHECKPOINT: ${{ needs.sign.outputs.checkpoint }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$CHECKPOINT" =~ ^[a-f0-9]{64}$ ]]
+          checkpoint="$(/usr/bin/python3 -I -B "$GITHUB_WORKSPACE/tools/sign_release.py" self-test \
+            --out "$RUNNER_TEMP/resonance-work/stage" --state-sha256 "$CHECKPOINT" --credentials-removed)"
+          [[ "$checkpoint" =~ ^[a-f0-9]{64}$ ]]
+          printf 'checkpoint=%s\n' "$checkpoint" >> "$GITHUB_OUTPUT"
+      - *pack_stage
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          path: ${{ runner.temp }}/resonance-work/carrier/self_test-stage-${{ github.run_attempt }}.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+  notarize:
+    needs: [sign, self_test]
+    runs-on: *native_runner
+    environment: resonance-notarization
+    timeout-minutes: 35
+    defaults: *bash_defaults
+    steps:
+      - *trusted_checkout
+      - *prepare_work
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.self_test.outputs.artifact_id }}
+          path: ${{ runner.temp }}/resonance-work/carrier
+          skip-decompress: true
+      - name: Verify and restore the self-tested stage from this run
+        env:
+          CARRIER_SHA: ${{ needs.self_test.outputs.carrier_sha256 }}
+        run: *restore_stage
+      - name: Compare the self-tested stage with the independent SIGN anchor
+        env:
+          CHECKPOINT: ${{ needs.self_test.outputs.checkpoint }}
+          SIGN_CHECKPOINT: ${{ needs.sign.outputs.checkpoint }}
+          SIGNED_TREE_SHA: ${{ needs.sign.outputs.signed_tree_sha256 }}
+          SIGNING_IDENTITY: ${{ needs.sign.outputs.signing_identity }}
+          SIGNING_TEAM_ID: ${{ needs.sign.outputs.signing_team_id }}
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I -B "$GITHUB_WORKSPACE/tools/sign_release.py" check-notarize \
+            --out "$RUNNER_TEMP/resonance-work/stage" --state-sha256 "$CHECKPOINT" \
+            --expected-sign-state-sha256 "$SIGN_CHECKPOINT" \
+            --expected-signed-tree-sha256 "$SIGNED_TREE_SHA" --expected-identity "$SIGNING_IDENTITY" \
+            --expected-team-id "$SIGNING_TEAM_ID" >/dev/null
+      - *prepare_keychain
+      - name: Notarize the self-tested stage
+        id: phase
+        timeout-minutes: 20
+        env:
+          CHECKPOINT: ${{ needs.self_test.outputs.checkpoint }}
+          SIGN_CHECKPOINT: ${{ needs.sign.outputs.checkpoint }}
+          SIGNED_TREE_SHA: ${{ needs.sign.outputs.signed_tree_sha256 }}
+          SIGNING_IDENTITY: ${{ needs.sign.outputs.signing_identity }}
+          SIGNING_TEAM_ID: ${{ needs.sign.outputs.signing_team_id }}
+          MAC_NOTARY_KEY_P8_BASE64: ${{ secrets.MAC_NOTARY_KEY_P8_BASE64 }}
+          MAC_NOTARY_KEY_ID: ${{ vars.MAC_NOTARY_KEY_ID }}
+          MAC_NOTARY_ISSUER: ${{ vars.MAC_NOTARY_ISSUER }}
+        run: |
+          set -euo pipefail
+          umask 077
+          auth="$(cd "$RUNNER_TEMP/resonance-auth-$GITHUB_JOB" && pwd -P)"
+          cleanup() {
+            local status=$?
+            unset MAC_NOTARY_KEY_P8_BASE64
+            /usr/bin/python3 -I -B "$auth/keychain.py" cleanup || status=1
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          [[ "$CHECKPOINT" =~ ^[a-f0-9]{64}$ && "$SIGN_CHECKPOINT" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$MAC_NOTARY_KEY_ID" =~ ^[A-Z0-9]{10}$ ]]
+          [[ "$MAC_NOTARY_ISSUER" =~ ^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$ ]]
+          /usr/bin/python3 -I -B - "$auth/notary.p8" <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+          import sys
+
+          try:
+              data = base64.b64decode(''.join(os.environ['MAC_NOTARY_KEY_P8_BASE64'].split()), validate=True)
+              if not data:
+                  raise ValueError
+              with Path(sys.argv[1]).open('xb') as target:
+                  target.write(data)
+          except (OSError, ValueError):
+              sys.exit('Could not decode the notary API key.')
+          PY
+          unset MAC_NOTARY_KEY_P8_BASE64
+          /usr/bin/python3 -I -B "$auth/keychain.py" create
+          keychain="$auth/temporary.keychain-db"
+          profile=resonance-notary
+          if ! /usr/bin/xcrun notarytool store-credentials "$profile" --key "$auth/notary.p8" \
+            --key-id "$MAC_NOTARY_KEY_ID" --issuer "$MAC_NOTARY_ISSUER" --keychain "$keychain" </dev/null >/dev/null 2>&1; then
+            printf '%s\n' 'Could not validate and store the notary API credentials.' >&2
+            exit 1
+          fi
+          rm "$auth/notary.p8"
+          checkpoint="$(/usr/bin/python3 -I -B "$GITHUB_WORKSPACE/tools/sign_release.py" notarize \
+            --out "$RUNNER_TEMP/resonance-work/stage" --state-sha256 "$CHECKPOINT" \
+            --expected-sign-state-sha256 "$SIGN_CHECKPOINT" \
+            --expected-signed-tree-sha256 "$SIGNED_TREE_SHA" --expected-identity "$SIGNING_IDENTITY" \
+            --expected-team-id "$SIGNING_TEAM_ID" \
+            --keychain-profile "$profile" --notary-keychain "$keychain")"
+          [[ "$checkpoint" =~ ^[a-f0-9]{64}$ ]]
+          printf 'checkpoint=%s\n' "$checkpoint" >> "$GITHUB_OUTPUT"
+      - *cleanup_keychain
+      - name: Finalize the notarized stage after cleanup
+        env:
+          CHECKPOINT: ${{ steps.phase.outputs.checkpoint }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$CHECKPOINT" =~ ^[a-f0-9]{64}$ ]]
+          checkpoint="$(/usr/bin/python3 -I -B "$GITHUB_WORKSPACE/tools/sign_release.py" finalize \
+            --out "$RUNNER_TEMP/resonance-work/stage" --state-sha256 "$CHECKPOINT")"
+          [[ "$checkpoint" =~ ^[a-f0-9]{64}$ ]]
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: resonance-signed-mac-evidence-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/resonance-work/stage/final/*.zip
+            ${{ runner.temp }}/resonance-work/stage/final/RELEASE-BUILD-MANIFEST.json
+          if-no-files-found: error
+          retention-days: 3

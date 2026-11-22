@@ -89,7 +89,7 @@ A finding’s optional dated capability history is displayed on its source card.
 Changing availability alone changes neither authored evidence nor a Keep’s
 fingerprint. History and imports never confer execution authority. Schema 4
 adds a format barrier without changing existing tables/rows, with the normal
-migration backup; portable format remains 2.
+migration backup; this migration retained portable format 2. Current exports use format 4.
 
 Unavailable/unknown previews offer Keep and local follow-up reply/separate-post
 drafts. Drafts preserve account, exact original and content snapshot within the

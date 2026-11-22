@@ -119,12 +119,12 @@ class MigrationTests(unittest.TestCase):
         with closing(sqlite3.connect(path)) as db:
             self.assertEqual(db.execute('SELECT number FROM sequence').fetchall(), [(n,) for n in range(1, 8)])
 
-    def test_backup_versions_one_two_and_three_import_without_clearing_omitted_collections(self):
+    def test_backup_versions_one_to_four_import_without_clearing_omitted_collections(self):
         store = server.Store(self.folder)
         exported = store.backup()
-        self.assertEqual(exported['schema_version'], 3)
+        self.assertEqual(exported['schema_version'], 4)
         store.mutate('PATCH', '/api/monitoring', {'scope': 'Synthetic retained scope'})
-        for version in (1, 2, 3):
+        for version in (1, 2, 3, 4):
             body = copy.deepcopy(exported)
             body['schema_version'] = version
             if version < 3:
@@ -134,7 +134,7 @@ class MigrationTests(unittest.TestCase):
             body.pop('communication')
             self.assertEqual(store.mutate('POST', '/api/import', body)[0], 200)
             self.assertEqual(store.backup()['monitoring']['config']['scope'], 'Synthetic retained scope')
-        for version in (True, 0, 4, '2'):
+        for version in (True, 0, 5, '2'):
             with self.assertRaisesRegex(server.Invalid, 'Unsupported backup version'):
                 store.mutate('POST', '/api/import', dict(exported, schema_version=version))
 
