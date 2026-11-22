@@ -4,13 +4,23 @@
 
 `0.1.0-preview.8 · source preview`
 
+## Start in Codex or Claude Code
+
+1. Download the [RES source ZIP from Releases](https://github.com/Bill-Viking/resonance/releases) and extract it. Find the folder containing `AUTHORING.md` and `ASSISTANT.md`.
+2. Open that folder as a **local project** in Codex, or choose **Code → Local → Open folder** in Claude Desktop. Start a chat in that project.
+3. Try **“Use RES and read AUTHORING.md. Give me two short Instagram captions for a neighborhood photo walk at noon. Skip the signature. Keep both drafts here.”** The drafts appear in the same chat.
+
+![Illustrated example of a Resonance project selected in the assistant sidebar, with a caption request and two drafts in the chat.](static/guide/project-chat.jpg)
+
+You can draft directly in the project chat. For a visual workspace with saved posts, accounts and reports, ask the assistant to start the local dashboard. [Illustrated user manual for both apps](static/guide/USING-RES.md)
+
 Resonance is a small app that runs on your own computer. It gathers your own posts, comments and replies into one place, marks the exact words that may land badly with the audience of that account, and helps you keep, change or remove each one. It has no account to create, no cloud behind it and no tracking inside it.
 
 This source preview includes desktop build tooling and the source edition. A packaged desktop app opens without a separate Python installation. Desktop candidates are unsigned; installer distribution and fresh-user verification are still pending. The source edition below requires Python. See [desktop builds and use](docs/DESKTOP.md).
 
 **The browser reader is a preview, not available in a store yet.** The candidate includes account discovery, Check now, saved receipts and text history for at most three own X posts or YouTube comments per account. It requires the separate reader in the same browser and explicit site permission. Ordinary store installation is still a release gate. Paste text, use samples or have your external assistant bring in your posts in the meantime. Other saved platforms, including Instagram and Substack, use those routes. See [the release notes](CHANGELOG.md).
 
-## Start from source
+## Open the optional web dashboard
 
 You need [Python](https://www.python.org/downloads/) 3.9 or newer. Get this folder onto your computer (**Code → Download ZIP**, or `git clone`), open a terminal in it, and run:
 

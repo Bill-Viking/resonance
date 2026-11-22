@@ -1,5 +1,7 @@
 # Desktop candidate: build and use
 
+For the project-chat workflow in Codex or Claude Code, start with the [illustrated user manual](../static/guide/USING-RES.md).
+
 A **candidate** is a self-contained Mac app or Windows folder that a person can open without installing Python, Node, a Terminal or Xcode. It is built by PyInstaller 6.22.3 in one-folder, windowed mode with no UPX compression, from an audited source export. Nothing here publishes, signs or notarizes anything.
 
 The packaged app is the same Resonance: it listens only on `127.0.0.1:4317`, makes no outgoing connections, holds no credentials and has no model inside. A small window says **Resonance running** and offers **Open Resonance** and **Quit**. Closing the window stops the local server and keeps everything you saved. If the address is already used by another program, Resonance shows a plain message and the log location; it never stops or reuses the other program.

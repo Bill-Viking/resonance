@@ -46,8 +46,8 @@
       "bytes": 9272
     },
     "README.md": {
-      "sha256": "2cb989f0182f40980d8878b7b8072728960f895b575a04d8ead3c01571207cf1",
-      "bytes": 11990
+      "sha256": "6a87dac0014bc63d7e91a9a476f53bd3cd4f6cb11285f6a546a62b6168e401e6",
+      "bytes": 12952
     },
     "SECURITY.md": {
       "sha256": "f2397042f6b4095db2f869b6b8926ac8257a24cb7a95ee8e1409e084807293a4",
@@ -126,8 +126,8 @@
       "bytes": 14743
     },
     "docs/DESKTOP.md": {
-      "sha256": "f516f9e1ccce9718644d77051b0f0cc2d068d659ab84548a531e919622366954",
-      "bytes": 6993
+      "sha256": "44ae3e9032d75dc78f5d323335732d876a521704c87e5fa5af846729c1d2e59f",
+      "bytes": 7121
     },
     "docs/MONITORING.md": {
       "sha256": "c161907f131c29ee1aeb87af279b513d9367a50814eff3f6bda213ddfa6d3edf",
@@ -220,6 +220,30 @@
     "static/app.js": {
       "sha256": "20416fb23cd35d6fa42371c3110e554139933be2d2c7dbe2de6f6ab9517f31a8",
       "bytes": 295217
+    },
+    "static/guide/USING-RES.md": {
+      "sha256": "f5467097164b7bfe22082e289823839dbf9f78caab5c684227465c5a45a0faa6",
+      "bytes": 5067
+    },
+    "static/guide/choose-account.jpg": {
+      "sha256": "de8d590c705b6b42932bcd3cc2be9eeb21745eacd44fa6dbfe47663000bd51bc",
+      "bytes": 10580
+    },
+    "static/guide/copy-request.jpg": {
+      "sha256": "5d418fac5cb73705dba8437bb207e5a2be8bf93daac5e557c9717b9dedfd2181",
+      "bytes": 28071
+    },
+    "static/guide/example-chat.jpg": {
+      "sha256": "a49efeb73904905737ed98f9ddc5e9a609facb380570f3fc6463bd93171ddd09",
+      "bytes": 24049
+    },
+    "static/guide/project-chat.jpg": {
+      "sha256": "cf33591b21d51f17755f713b6820bf95a5bab4af3f501c1a8c3d8765db037351",
+      "bytes": 31578
+    },
+    "static/guide/triage-results.jpg": {
+      "sha256": "a46f68a3f96a3504bf3fd36bb0f77c1399f4d6a99dda7b19d6cee86bf7ae09b0",
+      "bytes": 13260
     },
     "static/icon.svg": {
       "sha256": "09b471ab963fc7cc82de19f21e479325941e063fb6d7306fac72d455efcaa9d0",
