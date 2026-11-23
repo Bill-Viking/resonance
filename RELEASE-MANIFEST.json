@@ -38,8 +38,8 @@
       "bytes": 15409
     },
     "CHANGELOG.md": {
-      "sha256": "f1affc3132b33e96547022cfa0d6dc61c3fdd1314bb464723b56138bfc400e20",
-      "bytes": 13542
+      "sha256": "1932ae2c8815eb27ee24f328251929d6551beaa5f59429c2999f102a1114e2b5",
+      "bytes": 13746
     },
     "INTEGRATIONS.md": {
       "sha256": "41e7b82270f21a7bbf00be04b02d96e908a71b38498a45a7b5256a184f68ba30",
@@ -54,8 +54,8 @@
       "bytes": 11632
     },
     "README.md": {
-      "sha256": "6d25afe7980a78794c9a8b3444a8b6f51f70ea827e4364ff427192a1aef34ec8",
-      "bytes": 17554
+      "sha256": "ad5986c059a5996d36e9c8c86e404784bd836c5bf2b949fb2cb3aea805d62101",
+      "bytes": 17566
     },
     "SECURITY.md": {
       "sha256": "68d1b511da84e5eb1c247c66cb9b6659ec966fee4a71c774156dd413225e1c3f",
@@ -162,8 +162,8 @@
       "bytes": 14789
     },
     "docs/DESKTOP.md": {
-      "sha256": "43cdd0c4b21b2d7e2c602150c5c8a6d93f0a343a3ee76c7a9ec13f395b09fb6a",
-      "bytes": 9934
+      "sha256": "0c0976fc62df90529077505b1e46100ca03996ea8b19c076cfa45b2c891c6214",
+      "bytes": 9946
     },
     "docs/FACEBOOK-DISCOVERY.md": {
       "sha256": "46f84f072b7c39634ef8722d1a0571673c5e51c49e44a7a9a73eadaddacb78e9",

@@ -1,5 +1,9 @@
 # Changes
 
+## 0.1.0-rc.1 Windows package revision 2
+
+The bundled README now identifies the signed Windows download. The in-app guide and illustrated manual show that notification triage is available in this build.
+
 ## 0.1.0-rc.1 — source and Windows release candidate
 
 - The illustrated user manual starts with opening RES as a project in Codex
