@@ -1,28 +1,35 @@
-# Resonance
+# Use Resonance inside Codex or Claude Code
 
-**See what you have said online and how it may land. Fix it in your own voice. Privately, on your own computer.**
+**We recommend starting in a project chat in the Codex desktop app or the Code tab of Claude Desktop.** Use Resonance (RES) there to draft a social post in your voice, revise a caption, or review wording before you publish. For your first draft, all you need is the extracted RES folder and your signed-in assistant app.
 
-`0.1.0-rc.1 · source and Windows release candidate`
+**[Download RES for Codex or Claude Code (source ZIP)](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1/Resonance-0.1.0-rc.1-source.zip)** · [Illustrated user manual](static/guide/USING-RES.md)
+
+![Illustrated app paths. In Codex, select the Resonance project and start a chat. In Claude Desktop, choose Code, Local and the Resonance folder. Both paths lead to a caption draft in the same chat.](static/guide/project-chat.jpg)
 
 ## Start in Codex or Claude Code
 
-1. Download the [RES source ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1/Resonance-0.1.0-rc.1-source.zip) and extract it. Find the folder containing `AUTHORING.md` and `ASSISTANT.md`.
-2. Open that folder as a **local project** in Codex, or choose **Code → Local → Open folder** in Claude Desktop. Start a chat in that project.
-3. Try **“Use RES and read AUTHORING.md. Give me two short Instagram captions for a neighborhood photo walk at noon. Skip the signature. Keep both drafts here.”** The drafts appear in the same chat.
+Extract the ZIP. Find the folder containing `AUTHORING.md` and `ASSISTANT.md`. You can rename that folder **Resonance** to make it easy to find in the sidebar.
 
-![Illustrated example of a Resonance project selected in the assistant sidebar, with a caption request and two drafts in the chat.](static/guide/project-chat.jpg)
+| In your app | Open a RES chat |
+| --- | --- |
+| **Codex** | Add the extracted folder as a local project. Select it in the sidebar and start a chat under that project. |
+| **Claude Code** | Open **Claude Desktop → Code → Local → Open folder**. Choose the extracted folder and start a local session there. |
 
-You can draft directly in the project chat. For a visual workspace with saved posts, accounts and reports, ask the assistant to start the local dashboard. [Illustrated user manual for both apps](static/guide/USING-RES.md)
+Paste this into either chat.
 
-Resonance is a free, open-source app under the [MIT license](LICENSE) that runs on your own computer. It gathers your own posts, comments and replies into one place, marks the exact words that may land badly with the audience of that account, and helps you keep, change or remove each one. It has no account to create, no cloud behind it and no tracking inside it.
+> Use RES and read AUTHORING.md. Give me two short Instagram captions for a neighborhood photo walk at noon. Skip the signature. Keep both drafts here.
 
-For the standalone Windows dashboard, download the [signed Windows x64 ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1-windows.2/Resonance-0.1.0-rc.1-windows.2-x86_64-signed.zip), extract the whole folder, and open `Resonance.exe`. It includes Python. The Apple Silicon app is awaiting Apple signing and notarization. Mac users can use the source ZIP in Codex or Claude Code today. [Desktop guide](docs/DESKTOP.md)
-
-**The browser reader is a preview, not available in a store yet.** The candidate includes account discovery, Check now, saved receipts and text history for up to three recent own X main-timeline posts (not replies to other people) or YouTube comments per account. It requires the separate reader in the same browser and explicit site permission. Ordinary store installation is still a release gate. Paste text, use samples or have your external assistant bring in your posts in the meantime. Other saved platforms, including Instagram and Substack, use those routes. The current YouTube reader requires an English-language interface; opening comment videos may affect watch history or start playback before pausing. See [reader privacy](docs/READER-PRIVACY.md) and [the release notes](CHANGELOG.md).
+Both drafts appear in the same conversation. Pick one and ask for a change, such as “Make the second one sound like an invitation from a neighbor.”
 
 ## Open the optional web dashboard
 
-You need [Python](https://www.python.org/downloads/) 3.9 or newer. Get this folder onto your computer (**Code → Download ZIP**, or `git clone`), open a terminal in it, and run:
+For a visual workspace with saved accounts, posts and reports, ask in your RES chat, **“Start the local RES dashboard from this folder.”** The dashboard runs on your computer and stores the items you save there.
+
+On Windows you can also download the [signed Windows x64 ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1-windows.2/Resonance-0.1.0-rc.1-windows.2-x86_64-signed.zip), extract the entire folder and open `Resonance.exe`. It includes Python. The standalone Apple Silicon app is awaiting Apple signing and notarization. [Desktop guide](docs/DESKTOP.md)
+
+### Start the dashboard from source
+
+With [Python](https://www.python.org/downloads/) 3.9 or newer installed, open a terminal in the extracted project folder and run the command for your computer.
 
 | Your computer | Run |
 | --- | --- |
@@ -65,6 +72,10 @@ your assistant shares that scope with it. Opening a thread on the platform
 may send a read receipt.
 
 ## How your posts get in
+
+RES gathers the posts, comments and replies you choose to save, highlights wording that may land badly with your audience, and helps you decide what to keep, edit or remove. The local dashboard requires no RES account and includes no tracking.
+
+**The browser reader is a preview, not available in a store yet.** The candidate includes account discovery, Check now, saved receipts and text history for up to three recent own X main-timeline posts (not replies to other people) or YouTube comments per account. It requires the separate reader in the same browser and explicit site permission. Ordinary store installation is still a release gate. Paste text, use samples or have your external assistant bring in your posts in the meantime. Other saved platforms, including Instagram and Substack, use those routes. The current YouTube reader requires an English-language interface; opening comment videos may affect watch history or start playback before pausing. See [reader privacy](docs/READER-PRIVACY.md) and [the release notes](CHANGELOG.md).
 
 - **Paste them.** Always available, no assistant needed.
 - **Check now with the preview reader.** After setup, a deliberate click reads supported own text, saves a dated receipt with coverage gaps and makes local rule matches available for review. **See what was read** shows the exact saved text, including text with no matches. A saved account is not a current sign-in check. The reader never publishes, edits or deletes.

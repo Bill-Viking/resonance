@@ -2,11 +2,11 @@
 
 ## Start with the project chat
 
-1. Download the source ZIP from the [RES releases page](https://github.com/Bill-Viking/resonance/releases). Extract it. The project folder contains `README.md`, `AUTHORING.md` and `ASSISTANT.md`. You can name the folder **Resonance**.
+1. [Download the RES project for Codex or Claude Code (source ZIP)](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1/Resonance-0.1.0-rc.1-source.zip) and extract it. The project folder contains `README.md`, `AUTHORING.md` and `ASSISTANT.md`. You can name the folder **Resonance**.
 2. **Codex:** open or add that local project folder, select it in the sidebar and start a chat under it. **Claude Code:** in Claude Desktop’s **Code** tab choose the local environment, select **Open folder**, and pick the same folder. In the terminal edition, open your terminal in the folder and run `claude`. Use a signed-in assistant that can read local files. [Codex quickstart](https://developers.openai.com/codex/quickstart/) · [Claude Code desktop quickstart](https://code.claude.com/docs/en/desktop-quickstart)
 3. Ask for a draft in that chat. Try **“Use RES and read AUTHORING.md. Give me two short Instagram captions for a neighborhood photo walk at noon. Skip the signature. Keep both drafts here.”** The assistant reads the project’s public instructions and returns the options in the conversation. You can ask for a shorter or warmer version in the next message.
 
-![Illustrated project sidebar with Resonance selected and a Caption draft chat. The user requests two captions and the assistant returns both in the chat.](project-chat.jpg)
+![Illustrated app paths. Select the Resonance project in Codex, or choose Code, Local and the Resonance folder in Claude Desktop. The example shows a caption draft in the project chat.](project-chat.jpg)
 
 A first draft needs only the extracted public folder and your local assistant. To review actual posts, ask the assistant to read `ASSISTANT.md` and run your RES check. The saved-data tools need Python, and a live platform review needs an appropriately signed-in browser or connector. The assistant should tell you what it could inspect.
 

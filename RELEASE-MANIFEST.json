@@ -54,8 +54,8 @@
       "bytes": 11632
     },
     "README.md": {
-      "sha256": "ad5986c059a5996d36e9c8c86e404784bd836c5bf2b949fb2cb3aea805d62101",
-      "bytes": 17566
+      "sha256": "2e53372e7eb4f2b988c3c1ebde5cc56b0d4f272af7daabe395245055b42bddf1",
+      "bytes": 18107
     },
     "SECURITY.md": {
       "sha256": "68d1b511da84e5eb1c247c66cb9b6659ec966fee4a71c774156dd413225e1c3f",
@@ -294,16 +294,16 @@
       "bytes": 335502
     },
     "static/guide/USING-RES.md": {
-      "sha256": "2476840355858fc010d5f526cd7661b29ebf488ec8f8d55efc0f684bc43f85d7",
-      "bytes": 5078
+      "sha256": "8a068780ad842c7bfe073ceffa4fe4d951d521c50d649f43e1720f590bdf256a",
+      "bytes": 5176
     },
     "static/guide/choose-account.jpg": {
       "sha256": "de8d590c705b6b42932bcd3cc2be9eeb21745eacd44fa6dbfe47663000bd51bc",
       "bytes": 10580
     },
     "static/guide/codex.html": {
-      "sha256": "dec27708573358c0985a1323c393160b03db86c1fc46e871a6477af80b9c5405",
-      "bytes": 6975
+      "sha256": "852f12b861c775287bb1280c19870ad81b7a9b80d2aa8797289669117d25a481",
+      "bytes": 7087
     },
     "static/guide/copy-request.jpg": {
       "sha256": "5d418fac5cb73705dba8437bb207e5a2be8bf93daac5e557c9717b9dedfd2181",
@@ -318,8 +318,8 @@
       "bytes": 2331
     },
     "static/guide/project-chat.jpg": {
-      "sha256": "cf33591b21d51f17755f713b6820bf95a5bab4af3f501c1a8c3d8765db037351",
-      "bytes": 31578
+      "sha256": "f80d1ff0c1826c101b0291bfb7fc33fcd06217bfc1da757acf091ddf5f68a359",
+      "bytes": 149321
     },
     "static/guide/triage-results.jpg": {
       "sha256": "a46f68a3f96a3504bf3fd36bb0f77c1399f4d6a99dda7b19d6cee86bf7ae09b0",
