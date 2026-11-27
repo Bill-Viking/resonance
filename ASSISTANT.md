@@ -27,9 +27,15 @@ choices grant no publication authority. Never append a session plate or
 signature to collected text or the exact replacement text of an approved edit.
 
 For a separately authorized image post to Instagram, X or Facebook, use the
-[image post recovery procedure](AUTHORING.md#recovering-an-image-post). Keep
-the user's latest selection under the same local job name. Inspect each live
-destination before retrying, including Facebook for an Instagram cross-post.
+[image post recovery procedure](AUTHORING.md#recovering-an-image-post). Use one
+job for the post, its revisions and additional destinations. An ordinary
+Instagram request preserves the displayed sharing setting unless this person's
+instructions call for a change. Put each profile, its displayed audience and
+any unresolved sharing choice in the same final preview. Use `revise` for
+changes, `approve` to save an approval across steps, and `submit --confirm-preview`
+to record the final composer check and attempt immediately before clicking.
+Inspect each outstanding destination before retrying. A linked Facebook share
+needs its own Facebook receipt.
 
 If Gmail or Outlook accounts are saved, they still appear in every report, because every saved account must. Do not open them. Give each one `"status": "blocked"`, `"checked_at": null`, zero counts and no findings, and say in both `summary` and `coverage`: "Outside this public-post check; mail was not read." That states a limit of this check. It does not say the user is signed out.
 

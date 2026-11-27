@@ -2,7 +2,7 @@
 
 ## Start with the project chat
 
-1. [Download the RES project for Codex or Claude Code (source ZIP)](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1/Resonance-0.1.0-rc.1-source.zip) and extract it. The project folder contains `README.md`, `AUTHORING.md` and `ASSISTANT.md`. You can name the folder **Resonance**.
+1. [Download the RES project for Codex or Claude Code (source ZIP)](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0/Resonance-0.1.0-source.zip) and extract it. The project folder contains `README.md`, `AUTHORING.md` and `ASSISTANT.md`. You can name the folder **Resonance**.
 2. **Codex:** open or add that local project folder, select it in the sidebar and start a chat under it. **Claude Code:** in Claude Desktop’s **Code** tab choose the local environment, select **Open folder**, and pick the same folder. In the terminal edition, open your terminal in the folder and run `claude`. Use a signed-in assistant that can read local files. [Codex quickstart](https://developers.openai.com/codex/quickstart/) · [Claude Code desktop quickstart](https://code.claude.com/docs/en/desktop-quickstart)
 3. Ask for a draft in that chat. Try **“Use RES and read AUTHORING.md. Give me two short Instagram captions for a neighborhood photo walk at noon. Skip the signature. Keep both drafts here.”** The assistant reads the project’s public instructions and returns the options in the conversation. You can ask for a shorter or warmer version in the next message.
 

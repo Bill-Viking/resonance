@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0",
   "files": {
     ".claude/skills/resonance/SKILL.md": {
       "sha256": "ca7a6631ca41d34797372766182f5a439203e319d46f1c2a5d9f6a31b3a3589f",
@@ -26,20 +26,20 @@
       "bytes": 212
     },
     "AGENTS.md": {
-      "sha256": "8ce976c38f63c93706d100e860fc589084f5abe2efa2abe92a413aa67790cae7",
-      "bytes": 2444
+      "sha256": "26eef65d70e6405d53a93e8669cd279735305df77309c49d91de2f8340721648",
+      "bytes": 2851
     },
     "ASSISTANT.md": {
-      "sha256": "90cd1c90d91a2bd949dea82b38b14d8f9e3786d7c3e1f9885fcfbb41969dcaa3",
-      "bytes": 65846
+      "sha256": "8909d9241a5dc41e4640a9126826bbd2f58317e43d44327e38f5b685cf3b0170",
+      "bytes": 66268
     },
     "AUTHORING.md": {
-      "sha256": "a753d1a73c9de0d43eeaa2e3deba9f6f8614af1720b80fb4f828dee75cee5518",
-      "bytes": 15409
+      "sha256": "687c2c25cfdfc2d11d4f2b07ea9b896170a246bc3e12d6561f000fc8d578c3f1",
+      "bytes": 19540
     },
     "CHANGELOG.md": {
-      "sha256": "1932ae2c8815eb27ee24f328251929d6551beaa5f59429c2999f102a1114e2b5",
-      "bytes": 13746
+      "sha256": "bfb9db124818eb6f0b5ece8fa82aad0d3a23f1a13cd695f4a7f6f2f7c2c4bc58",
+      "bytes": 14276
     },
     "INTEGRATIONS.md": {
       "sha256": "41e7b82270f21a7bbf00be04b02d96e908a71b38498a45a7b5256a184f68ba30",
@@ -54,20 +54,20 @@
       "bytes": 11632
     },
     "README.md": {
-      "sha256": "2e53372e7eb4f2b988c3c1ebde5cc56b0d4f272af7daabe395245055b42bddf1",
-      "bytes": 18107
+      "sha256": "05269655606908b4e6e0585b9c972eaeea2469bceb63f3ae07c87b384651d04e",
+      "bytes": 18380
     },
     "SECURITY.md": {
-      "sha256": "68d1b511da84e5eb1c247c66cb9b6659ec966fee4a71c774156dd413225e1c3f",
-      "bytes": 25343
+      "sha256": "a024761eb1c5ae858bae14d649468bf5daab1fb1eff8b1f112dbfa2ffce59848",
+      "bytes": 25721
     },
     "THIRD-PARTY-NOTICES.txt": {
       "sha256": "ac18e9c33f0356fb70fcdf2655c8bc2af2da44b8ce4db493c0a50ad64633362f",
       "bytes": 226707
     },
     "VERSION": {
-      "sha256": "5c9c112fc83af1a2f8c196a676c8f81d1a28aab1ffe9bacd0e8265a150e2e20e",
-      "bytes": 11
+      "sha256": "e9dd8507f4bf0c6f42458e41aea833ad0bd3f6127272335eee9bf4d58541ed67",
+      "bytes": 6
     },
     "assistant_kit.py": {
       "sha256": "354bd46854dc4d0a72d64fec62dd89641e2a3506abb331b32757fb79c7143f44",
@@ -162,8 +162,8 @@
       "bytes": 14789
     },
     "docs/DESKTOP.md": {
-      "sha256": "0c0976fc62df90529077505b1e46100ca03996ea8b19c076cfa45b2c891c6214",
-      "bytes": 9946
+      "sha256": "5246e111386d448c063e2326e51fdeeae62480a17234d207537ab89820c34540",
+      "bytes": 9927
     },
     "docs/FACEBOOK-DISCOVERY.md": {
       "sha256": "46f84f072b7c39634ef8722d1a0571673c5e51c49e44a7a9a73eadaddacb78e9",
@@ -174,8 +174,8 @@
       "bytes": 17729
     },
     "docs/READER-PRIVACY.md": {
-      "sha256": "5818b5b76f2fce9b40ac6d2b641c24806256310d79e0e054da650c2b4f5d722b",
-      "bytes": 3018
+      "sha256": "10562d8b20b2fdb0427f30af6eab9f1b1e2a434d0ea8ff0916acc6d6dfbb8ec6",
+      "bytes": 3003
     },
     "docs/SAFE-WORK.md": {
       "sha256": "a7a508259ffc501a72f26bcb22d43b7e1c183ad49b738c5d8de5c1c8aca741a1",
@@ -206,8 +206,8 @@
       "bytes": 2698
     },
     "image_post.py": {
-      "sha256": "e4fce08cdd584534a8ab3181a1131ed5af51515b7140d47f9de990cd91ac1a28",
-      "bytes": 19378
+      "sha256": "e7d122d39c728ef9c125d079899237eafeecf2202777903d4ef5e5930bcc6dda",
+      "bytes": 26832
     },
     "mac-launcher/README.md": {
       "sha256": "7796ae62694aba862cdc046215d67d472867003cbd3ab81cc4e16900a8cacc86",
@@ -294,16 +294,16 @@
       "bytes": 335502
     },
     "static/guide/USING-RES.md": {
-      "sha256": "8a068780ad842c7bfe073ceffa4fe4d951d521c50d649f43e1720f590bdf256a",
-      "bytes": 5176
+      "sha256": "99a626785940eecb88a05e9ef01dfb274265cf01d0c87e73496a86e417a8702d",
+      "bytes": 5166
     },
     "static/guide/choose-account.jpg": {
       "sha256": "de8d590c705b6b42932bcd3cc2be9eeb21745eacd44fa6dbfe47663000bd51bc",
       "bytes": 10580
     },
     "static/guide/codex.html": {
-      "sha256": "852f12b861c775287bb1280c19870ad81b7a9b80d2aa8797289669117d25a481",
-      "bytes": 7087
+      "sha256": "01862dcefa89c4ee20b13e1c2627b252bd898ef0b08e39859e8169754cb7e29a",
+      "bytes": 7077
     },
     "static/guide/copy-request.jpg": {
       "sha256": "5d418fac5cb73705dba8437bb207e5a2be8bf93daac5e557c9717b9dedfd2181",
@@ -352,6 +352,10 @@
     "tests/identity_helpers.py": {
       "sha256": "3b55182fa8be51ece106d27fe221bc334ae73562fc92d0fb8c2db0ee3d87e12a",
       "bytes": 1725
+    },
+    "tests/measure_image_post.py": {
+      "sha256": "5435552c432a53cf61d8e1486451de98f62ab48dfd8799aa3521dac862188ad3",
+      "bytes": 5434
     },
     "tests/reader-fixtures/audited_runtime.cjs": {
       "sha256": "4fdf04916f6c16687cd4ff2fe59eaebd816bca1435538d10e1222bf2310ec9ee",
@@ -658,8 +662,8 @@
       "bytes": 22377
     },
     "tests/test_image_post.py": {
-      "sha256": "d8dad01ddb2ebd6d7bb84c19eadd3849249430fb77624e2373081971a6186aa2",
-      "bytes": 12551
+      "sha256": "26ce7c8d123b31d234b78684e5387ed658a2a4880a65bc2a4f8fa8f0c742eaaf",
+      "bytes": 22661
     },
     "tests/test_launcher_edges.py": {
       "sha256": "2b304281f1582771e1b0ad66d83fa21ba5a61191f255c8f9a59cbf443a28f9d9",

@@ -1,6 +1,6 @@
-# Desktop candidate: build and use
+# Use the desktop dashboard and build it from source
 
-Download the [signed Windows x64 ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1-windows.2/Resonance-0.1.0-rc.1-windows.2-x86_64-signed.zip), extract the entire folder, then open `Resonance.exe` inside it. Python is bundled. The Apple Silicon app is awaiting signing and notarization. On macOS, open the [source ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1/Resonance-0.1.0-rc.1-source.zip) as a local project in Codex or Claude Code. Running the dashboard from source requires Python 3.9 or later.
+Download the [signed Windows x64 ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0/Resonance-0.1.0-windows-x86_64-signed.zip), extract the entire folder, then open `Resonance.exe` inside it. Python is bundled. The Apple Silicon app is awaiting signing and notarization. On macOS, open the [source ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0/Resonance-0.1.0-source.zip) as a local project in Codex or Claude Code. Running the dashboard from source requires Python 3.9 or later.
 
 The app listens only on `127.0.0.1:4317`, makes no outgoing connections, holds no credentials and has no model inside. Its small window offers **Open Resonance** and **Quit**. Closing that window stops the local server and preserves saved data. Closing only the browser does not quit the app.
 
@@ -28,7 +28,7 @@ The preparation step is a builder-only network operation. It installs exact, has
 From a clean, committed source checkout, make an audited export outside the checkout. Replace the example version with the exact value in `VERSION`:
 
 ```
-/path/to/build-venv/bin/python -I -B tools/make_release.py --version 0.1.0-rc.1 --out /path/to/runtime
+/path/to/build-venv/bin/python -I -B tools/make_release.py --version 0.1.0 --out /path/to/runtime
 ```
 
 Developer note: `.gitattributes` pins text to LF on checkout (`* text=auto eol=lf`) so native and export builds see the same bytes whatever a developer's `core.autocrlf` is, and the exporter's isolated status check stays clean on Windows. Git's binary detection and `THIRD-PARTY-NOTICES.txt` (`-text`) remain byte-exact. Global Git configuration is not changed.

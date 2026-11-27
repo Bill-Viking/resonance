@@ -12,6 +12,12 @@ approved asset.
 Internal session plates are not public signatures.
 Preparing a draft does not authorize publication or retroactive changes.
 
+For an authorized image post, follow [the posting workflow](AUTHORING.md#recovering-an-image-post)
+in the same job. “Post to Instagram” leaves the linked sharing choice open.
+Use this person's instructions and the account and audience in the composer.
+Include enabled linked sharing in the final preview. “Instagram only” is a
+per-post override. Carry forward facts and approvals that still match.
+
 ## You are helping someone use Resonance
 
 For a one-time social notification review or help drafting a reply to a

@@ -2,7 +2,7 @@
 
 **We recommend starting in a project chat in the Codex desktop app or the Code tab of Claude Desktop.** Use Resonance (RES) there to draft a social post in your voice, revise a caption, or review wording before you publish. For your first draft, all you need is the extracted RES folder and your signed-in assistant app.
 
-**[Download RES for Codex or Claude Code (source ZIP)](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1/Resonance-0.1.0-rc.1-source.zip)** · [Illustrated user manual](static/guide/USING-RES.md)
+**[Download RES for Codex or Claude Code (source ZIP)](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0/Resonance-0.1.0-source.zip)** · [Illustrated user manual](static/guide/USING-RES.md)
 
 ![Illustrated app paths. In Codex, select the Resonance project and start a chat. In Claude Desktop, choose Code, Local and the Resonance folder. Both paths lead to a caption draft in the same chat.](static/guide/project-chat.jpg)
 
@@ -25,7 +25,7 @@ Both drafts appear in the same conversation. Pick one and ask for a change, such
 
 For a visual workspace with saved accounts, posts and reports, ask in your RES chat, **“Start the local RES dashboard from this folder.”** The dashboard runs on your computer and stores the items you save there.
 
-On Windows you can also download the [signed Windows x64 ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0-rc.1-windows.2/Resonance-0.1.0-rc.1-windows.2-x86_64-signed.zip), extract the entire folder and open `Resonance.exe`. It includes Python. The standalone Apple Silicon app is awaiting Apple signing and notarization. [Desktop guide](docs/DESKTOP.md)
+On Windows you can also download the [signed Windows x64 ZIP](https://github.com/Bill-Viking/resonance/releases/download/v0.1.0/Resonance-0.1.0-windows-x86_64-signed.zip), extract the entire folder and open `Resonance.exe`. It includes Python. The standalone Apple Silicon app is awaiting Apple signing and notarization. [Desktop guide](docs/DESKTOP.md)
 
 ### Start the dashboard from source
 
@@ -123,6 +123,11 @@ banner. From **Settings & data**, open **Preferences: personal brand and RES cre
 short or full signature and independently request your approved banner. Your
 instruction for a particular item takes priority. These settings guide your
 external assistant; the app does not add anything to saved text or publish it.
+
+When you ask your assistant to post an image to Instagram, the preview shows
+the linked Facebook profile and its displayed audience if sharing is enabled.
+Your standing choices apply, and “Instagram only” overrides them for that
+post. You can revise the caption or add a destination to the same job.
 
 If an Instagram, X or Facebook image post is interrupted, your assistant can
 recover the last image you picked even after its original file is gone. It

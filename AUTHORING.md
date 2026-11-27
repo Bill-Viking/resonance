@@ -147,11 +147,12 @@ presenting the draft as researched.
 
 1. Identify the destination, whether this is a new item or a reply, and any exact
    wording or attribution instruction. Keep the user's voice and authorship.
-2. Read the saved choice and apply any direct user instruction. Consolidate known
+2. Read the saved choice once for the item and apply any direct user instruction. Consolidate known
    audience, unit, format, duration, framing, research and branding requirements
    before generation; ask only for missing material choices. Show the finished
-   text and any requested media together. Keep preference and implementation
-   explanations outside the public copy.
+   text and requested media together. When publication is already requested,
+   use the final destination preview below for this step. Keep preference and
+   implementation explanations outside the public copy.
 3. Check that off means no added branding; opt-in choices match the preview;
    custom wording appears only once; no internal session plate entered a public
    field; and any approved graphic remains unchanged, fully visible and free of
@@ -180,51 +181,104 @@ the separately authorized publishing workflow still apply.
 
 ## Recovering an image post
 
-When the user authorizes a single-image post to Instagram, X or Facebook, use
-`image_post.py` from the same assistant kit before opening the composer. The
-assistant operates and inspects the live platform. The helper saves the chosen
-image and each destination's progress in the private RES data folder. Use one
-local job name for the entire post, including any authorized cross-post.
+Use one private job for a separately authorized single-image post to Instagram,
+X or Facebook. The assistant works in the browser. The local helper saves the
+selected image, the plan for each account and the delivery record.
 
-1. Save the authorized accounts and exact captions in a private plan file.
-   Include only the requested destinations. For example, an X-only plan is
-   `{"X":{"profile":"https://x.com/example_user","caption":"Evening at the lake."}}`.
-   Run `python3 image_post.py start lake-photo --image "chosen.png" --plan plan.json`.
-   The start and status commands return the current `version`, `selected_path` and destination
-   records. The first 64 characters of `selected` are the local image's SHA-256
-   digest. Use the saved path for the upload, even if the phone's original file
-   disappears. Keep plan and evidence files outside the project.
-2. When the user picks a different image for the same post, immediately run
-   `python3 image_post.py select lake-photo --version N --image "replacement.png"`.
-   Carry forward the returned version and selection. A version conflict means
-   another action changed the job. Read its status and reconcile that action
-   before continuing. A verified destination keeps its original receipt. If it
-   published the earlier image, tell the user which one went live.
-3. Inspect the signed-in account. Run `attach` immediately before uploading the
-   saved file, then `preview` only after seeing the intended image in that
-   account's composer. Check the caption, audience, crop and destination. Run
-   `submit` immediately before the single publish click. For example, the X
-   attach command is `python3 image_post.py attach lake-photo X --version N --profile URL --sha256 HASH`.
-   The preview and submit commands use the same arguments with the **new**
-   version from the preceding command. A failed helper command stops that
-   browser action. For Instagram submit, add `--facebook-off` when the live
-   switch is off, or `--facebook-profile URL` for an authorized cross-post to
-   the displayed Facebook account. Turn the switch off if Facebook is outside
-   the request or already has a verified post.
-4. Before a potentially slow upload or publish click, arm
+**Decide what belongs in the final preview.** Read the sharing and audience
+choices this person gave for these accounts in their saved assistant
+preferences or in the conversation. A past job records only that post.
+If no standing choice is available, use the displayed setting in the preview.
+Reuse the current profile read, approved caption,
+selected image and branding decision from this job. “Post to Instagram”
+names the starting destination. “Instagram only” or “skip Facebook this time”
+overrides a standing choice for this post. The platform switch alone grants
+no permission to publish.
+
+| What the composer and user tell you | What to do |
+| --- | --- |
+| Ordinary Instagram request, linked sharing on, no conflicting instruction | Leave it on. Include the exact linked Facebook profile and displayed audience in the Instagram preview. One approval covering both destinations authorizes one shared submission. |
+| Ordinary request, sharing off, no standing choice to include Facebook | Leave it off and preview Instagram. |
+| Explicit Instagram-only, or a standing opt-out with no override | Set sharing off **for this post** if needed. Verify the off state and preview Instagram. |
+| User requested linked sharing, including through a standing choice | Match the linked account and audience. Enable sharing for this post when the instruction and displayed destination agree. Include both in the preview. |
+| Wrong or uncertain identity, different audience from the user's choice, conflicting standing instructions, or a switch that would duplicate an earlier delivery | Show what the platform says and the specific choice still needed in the existing preview. Hold that delivery until resolved. Recheck the affected control after a change. |
+
+Use the audience label on that account. Never assume “Friends,” widen the
+audience, change a permanent setting or add a separate destination on the
+user's behalf. If the audience is unclear, inspect the platform's audience
+or account visibility control. Describe a remaining gap in the preview.
+
+**Start and attach once.** Run `python3 image_post.py` before each command
+below. Keep plan and evidence files private and outside the project.
+
+1. `start lake-photo --image chosen.png --plan plan.json` saves the image and
+   known destinations. An example plan is
+   `{"Instagram":{"profile":"https://instagram.com/example_studio","caption":"Evening at the lake.","audience":"Followers"}}`.
+   Include the exact displayed audience when known. The returned
+   `selected_path` is the upload source and the first 64 characters of
+   `selected` are the SHA-256 digest. Use the version returned by each command
+   directly. Read `status` on loss of context or a version conflict.
+2. Reuse the current browser and composer. Inspect the active account and run
+   `attach lake-photo Instagram --version N --profile URL --sha256 HASH`
+   immediately before uploading the saved file. Inspect the visible image,
+   crop, caption, credit, identities, audiences and sharing switch together.
+   If the linked destination first appears here, add it in this job before
+   showing the preview (see **Change the plan** below).
+3. Show the finished media and exact text, each destination profile with its
+   displayed audience, and any material choice above, in **one final preview**.
+   Get the required authorization. If the user has already approved that exact
+   final preview, carry it forward. A caption approval alone cannot cover a
+   newly discovered Facebook audience. A sign-in delay or adding X does not
+   require approval of the unchanged Instagram post again. If there is a wait
+   or more than one composer, save the approval with
+   `approve lake-photo Instagram Facebook --version N` for the named targets
+   the user approved. Record their displayed audiences in the plan first.
+4. Immediately before the click, with the approved details still visible, run
+   `submit lake-photo Instagram --version N --profile URL --sha256 HASH --confirm-preview --audience LABEL --facebook-profile FB_URL --facebook-audience FB_LABEL`.
+   Quote labels containing spaces. This records the observed image preview and
+   both attempts together. Use `--facebook-off` in place of both Facebook
+   arguments when Instagram shows sharing off. Direct X or Facebook uses its
+   own platform, profile and audience and no Instagram switches. Click publish
+   once after a successful command. If the preview drifted, reconcile the
+   change first. When attachment and the decision to publish occur at different
+   times, `preview` can still checkpoint a visible attachment. That checkpoint
+   alone grants no authority to publish.
+
+**Change the plan.** Use `revise lake-photo --version N --plan changes.json`
+for a new destination or a correction. For example, adding a linked Facebook
+profile uses
+`{"Facebook":{"profile":"https://facebook.com/example_studio","caption":"Evening at the lake.","audience":"Friends"}}`.
+Use an X entry to add a separately requested X post. List only the changes.
+Linked delivery uses the same image and caption on both accounts. If the
+approved captions differ, resolve delivery in the preview before clicking.
+Add `--image replacement.png` for a new image in the same revision, or use
+`select lake-photo --version N --image replacement.png` for an image change
+alone. Use `--remove Facebook` to withdraw a never-submitted destination
+whose composer is settled. Check the switch before proceeding on Instagram.
+
+Show the changed scope once. Reuse a matching attachment for a caption-only
+change. A new image needs inspection in each affected composer. A revision
+preserves other destinations' approvals, pending attempts and verified
+receipts. Reconcile an outstanding submission before changing its caption or
+audience. A late success must match the image and text actually submitted.
+Never start a fresh job to work around a pending or verified destination.
+
+**Follow delivery through to receipts.**
+
+1. Before a potentially slow upload or publish click, arm
    `python3 image_post.py watch lake-photo X` independently when the assistant
    can run a timer alongside the browser. Report the waiting platform,
    elapsed time and last confirmed step at about 15 seconds. If the browser
    blocks progress reporting, give that update as soon as control returns.
-5. After a timeout, interruption or reconnect, use `python3 image_post.py list`
-   to find the existing job and `python3 image_post.py status lake-photo` for
-   its version. Run `python3 image_post.py resume lake-photo --version N`
+2. After a timeout, interruption or reconnect, use the known job and version.
+   Use `list` if the name was lost or `status lake-photo` if the version was
+   lost. Run `python3 image_post.py resume lake-photo --version N`
    before another browser action. Inspect the account, current composer and
    recent posts on **each outstanding platform**, including Facebook when
    Instagram cross-posting was enabled. Reopen a candidate post and check
    its author, timing, caption and visible image against the saved attempt.
    A matching item from an earlier, unrelated post is insufficient.
-6. Record each live result with
+3. Record each live result with
    `python3 image_post.py observe lake-photo X --version N --evidence observation.json`.
    Take the observation after reading the current state. Include the exact
    signed-in `profile`, a fresh ISO timestamp with timezone in `checked_at`,
@@ -232,7 +286,7 @@ local job name for the entire post, including any authorized cross-post.
 
    | `result` | Evidence from this destination | Next action |
    | --- | --- | --- |
-   | `published` | `author_profile`, original `permalink`, exact `caption`, and `matched_image_sha256` identifying the local image visually matched in the published post. Platforms may re-encode the image. | Save the receipt and skip this destination on retries. |
+   | `published` | `author_profile`, original `permalink`, exact `caption`, and `matched_image_sha256` identifying the local image visually matched in the published post. Include `audience` when the published item displays it. Platforms may re-encode the image. | Save the receipt and skip this destination on retries. If the displayed audience differs from the plan, record `unknown` with the discrepancy and tell the user. |
    | `absent` | `recent_posts_checked: true`, `prior_action_settled: true`, and `composer` set to `empty` or `selected_image`. For a matching preview include its `matched_image_sha256`. After a submission, also give the platform's explicit failure in `submission_failure`. | Follow the returned phase. Attach only to an empty composer. Reuse a matching preview. |
    | `unknown` | Describe the missing or conflicting evidence. A timeout, processing notice or empty timeline alone leaves submission unresolved. | Hold this destination and continue checking the others. |
 

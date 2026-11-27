@@ -108,18 +108,36 @@ def profile(platform, value):
     return key
 
 
-def new_record(plan, now):
+def audience_label(value):
+    if not isinstance(value, str) or not value.strip() or len(value) > 1000:
+        raise Invalid('Supply the exact nonblank audience label shown by the platform (at most 1,000 characters).')
+    return value
+
+
+def validate_plan(plan):
     if not isinstance(plan, dict) or not plan or not set(plan) <= set(PLATFORMS):
         raise Invalid('Choose an authorized Instagram, X or Facebook destination.')
-    targets = {}
     for platform, item in plan.items():
-        if not isinstance(item, dict) or set(item) != {'profile', 'caption'}:
-            raise Invalid('Each destination needs its profile URL and exact caption.')
-        profile(platform, item['profile'])
-        if not isinstance(item['caption'], str) or len(item['caption']) > 20000:
+        if not isinstance(item, dict) or item.keys() - {'profile', 'caption', 'audience'}:
+            raise Invalid('Use only the profile URL, exact caption and optional audience for each destination.')
+        if 'profile' in item:
+            profile(platform, item['profile'])
+        if 'caption' in item and (not isinstance(item['caption'], str) or len(item['caption']) > 20000):
             raise Invalid('Use a text caption of at most 20,000 characters.')
-        targets[platform] = dict(item, phase='ready', preview=None, attempt_image=None, submissions=0,
-                                 permalink=None, changed_at=now, observation=None)
+        if 'audience' in item:
+            audience_label(item['audience'])
+    return plan
+
+
+def new_destination(item, now):
+    if not {'profile', 'caption'} <= item.keys():
+        raise Invalid('Each new destination needs its profile URL and exact caption.')
+    return dict(item, phase='ready', preview=None, attempt_image=None, submissions=0,
+                permalink=None, changed_at=now, observation=None)
+
+
+def new_record(plan, now):
+    targets = {platform: new_destination(item, now) for platform, item in validate_plan(plan).items()}
     return dict(format=1, version=1, destinations=targets)
 
 
@@ -179,7 +197,7 @@ def observe(record, platform, target, evidence, now, folder):
     outcome = evidence.get('result')
     common = {'profile', 'checked_at', 'result', 'detail'}
     allowed = {
-        'published': {'author_profile', 'permalink', 'caption', 'matched_image_sha256'},
+        'published': {'author_profile', 'permalink', 'caption', 'matched_image_sha256', 'audience'},
         'absent': {'composer', 'prior_action_settled', 'recent_posts_checked', 'matched_image_sha256', 'submission_failure'},
         'unknown': set(),
     }
@@ -200,6 +218,11 @@ def observe(record, platform, target, evidence, now, folder):
                 or evidence.get('caption') != target['caption']):
             raise Invalid('The observed image and caption must match the exact post.')
         link = checked_link(platform, target, evidence.get('permalink'))
+        if 'audience' in evidence:
+            shown = audience_label(evidence['audience'])
+            if target.get('audience') is not None and shown != target['audience']:
+                raise Invalid('The published audience differs from the plan. Record unknown and report the discrepancy.')
+            target['published_audience'] = shown
         target.update(phase='verified', permalink=link, published_image=image)
     elif outcome == 'absent':
         if (evidence.get('recent_posts_checked') is not True or evidence.get('prior_action_settled') is not True
@@ -216,6 +239,9 @@ def observe(record, platform, target, evidence, now, folder):
             preview = record['selected']
         elif 'matched_image_sha256' in evidence:
             raise Invalid('An empty composer cannot have a matching image preview.')
+        approval = target.get('approval')
+        if target['attempt_image'] and approval and approval['image'] != record['selected']:
+            invalidate_approval(target)
         target.update(phase='attached' if preview else 'ready', preview=preview, attempt_image=None)
     else:
         target['phase'] = 'check_destination'
@@ -233,16 +259,154 @@ def require_current_retry_check(target, now):
             raise Invalid('The retry check expired. Inspect the live destination and composer again.')
 
 
+def invalidate_approval(target):
+    target.pop('approval', None)
+    target['approval_required'] = True
+
+
+def select_image(record, folder, source, now):
+    selected = save_image(folder, source)
+    if record['selected'] == selected:
+        return False
+    record['selected'] = selected
+    for target in record['destinations'].values():
+        if target['phase'] == 'verified':
+            continue
+        approval = target.get('approval')
+        if not (target['attempt_image'] and approval and approval['image'] == target['attempt_image']):
+            invalidate_approval(target)
+        if target['phase'] != 'ready':
+            target.update(phase='check_destination', changed_at=now)
+    return True
+
+
+def require_revisable(target):
+    if target['phase'] == 'verified':
+        raise Invalid('This destination already has a verified permalink.')
+    if target['attempt_image'] or target['phase'] == 'awaiting_post':
+        raise Invalid('Resolve the pending submission before changing this destination.')
+
+
+def revise(record, args, folder, now):
+    if args.plan is None and args.image is None and not args.remove:
+        raise Invalid('Supply a plan patch, an image or destinations to remove.')
+    patch = validate_plan(local_json(args.plan)) if args.plan is not None else {}
+    remove = set(args.remove or ())
+    targets = record['destinations']
+    if remove & patch.keys():
+        raise Invalid('A destination cannot be updated and removed in the same revision.')
+    if not remove <= targets.keys():
+        raise Invalid('A destination to remove is outside the saved post destinations.')
+    if not ((targets.keys() | patch.keys()) - remove):
+        raise Invalid('Keep at least one destination in the saved post.')
+    for platform in remove:
+        target = targets[platform]
+        if target['submissions'] or target['attempt_image'] or target['phase'] not in ('ready', 'attached'):
+            raise Invalid('Remove only a ready or attached destination that has never been submitted.')
+
+    changes = {}
+    for platform, item in patch.items():
+        target = targets.get(platform)
+        if target is None:
+            changes[platform] = new_destination(item, now)
+            continue
+        if 'profile' in item and profile(platform, item['profile']) != profile(platform, target['profile']):
+            raise Invalid('The revised profile must match the saved destination account.')
+        fields = {key: item[key] for key in ('caption', 'audience')
+                  if key in item and target.get(key) != item[key]}
+        if fields:
+            require_revisable(target)
+            changes[platform] = dict(target, **fields, changed_at=now)
+
+    for target in changes.values():
+        invalidate_approval(target)
+    for platform in remove:
+        del targets[platform]
+    targets.update(changes)
+    image_changed = args.image is not None and select_image(record, folder, args.image, now)
+    return bool(changes or remove or image_changed)
+
+
+def approval_scope(target, selected, audience):
+    return {'image': selected, 'profile': target['profile'], 'caption': target['caption'], 'audience': audience}
+
+
+def approve(record, platforms):
+    changes = []
+    for platform in dict.fromkeys(platforms):
+        target = record['destinations'].get(platform)
+        if target is None:
+            raise Invalid('This platform is outside the saved post destinations.')
+        audience = audience_label(target.get('audience'))
+        scope = approval_scope(target, record['selected'], audience)
+        if target.get('approval') == scope:
+            continue
+        require_revisable(target)
+        changes.append((target, scope))
+    for target, scope in changes:
+        target['approval'] = scope
+        target.pop('approval_required', None)
+    return bool(changes)
+
+
+def submission_approval(target, selected, audience, confirm_preview):
+    if not (confirm_preview or audience is not None or target.get('audience')
+            or target.get('approval') or target.get('approval_required')):
+        return None  # Legacy submission without audience tracking or an approval scope.
+    observed = audience_label(audience)
+    if 'audience' in target and observed != target['audience']:
+        raise Invalid('The visible audience must match the saved destination audience exactly.')
+    scope = approval_scope(target, selected, observed)
+    if not confirm_preview and target.get('approval') != scope:
+        raise Invalid('Record current user approval for this image, caption, profile and audience before submitting.')
+    return scope
+
+
+def submit(record, args, platform, target, now):
+    selected = record['selected']
+    if args.confirm_preview:
+        require_phase(target, 'attaching', 'attached')
+    else:
+        require_phase(target, 'attached')
+        if target['preview'] != selected:
+            raise Invalid('Check the latest selected image in the live composer.')
+    group = [(target, args.audience)]
+    if platform == 'Instagram' and not (args.facebook_profile or args.facebook_off):
+        raise Invalid('Inspect the Instagram cross-post switch and specify its Facebook profile or --facebook-off.')
+    if platform != 'Instagram' and args.facebook_off:
+        raise Invalid('--facebook-off applies only to the Instagram composer.')
+    if args.facebook_audience is not None and not args.facebook_profile:
+        raise Invalid('--facebook-audience requires the Facebook profile shown by the Instagram cross-post switch.')
+    if args.facebook_profile:
+        facebook = record['destinations'].get('Facebook')
+        if (platform != 'Instagram' or facebook is None
+                or profile('Facebook', args.facebook_profile) != profile('Facebook', facebook['profile'])):
+            raise Invalid('The Facebook cross-post destination must match the authorized account.')
+        require_phase(facebook, 'ready')
+        require_current_retry_check(facebook, now)
+        if facebook['caption'] != target['caption']:
+            raise Invalid('Instagram and Facebook cross-posting requires the same exact caption for both destinations.')
+        group.append((facebook, args.facebook_audience))
+
+    approvals = [submission_approval(item, selected, label, args.confirm_preview) for item, label in group]
+    target['preview'] = selected
+    for (item, _), scope in zip(group, approvals):
+        if scope is not None:
+            item.update(audience=scope['audience'], approval=scope)
+            item.pop('approval_required', None)
+        item.update(phase='awaiting_post', attempt_image=selected,
+                    submissions=item['submissions'] + 1, changed_at=now)
+
+
 def update(record, args, folder, now):
     targets = record['destinations']
     if args.operation == 'select':
-        selected = save_image(folder, args.image)
-        if record['selected'] != selected:
-            record['selected'] = selected
-            for target in targets.values():
-                if target['phase'] not in ('ready', 'verified'):
-                    target.update(phase='check_destination', changed_at=now)
+        select_image(record, folder, args.image, now)
         return
+    if args.operation == 'revise':
+        return revise(record, args, folder, now)
+    if args.operation == 'approve':
+        return approve(record, args.platforms)
     if args.operation == 'resume':
         for target in targets.values():
             if target['phase'] != 'verified':
@@ -271,25 +435,7 @@ def update(record, args, folder, now):
         require_phase(target, 'attaching')
         target.update(phase='attached', preview=record['selected'])
     elif args.operation == 'submit':
-        require_phase(target, 'attached')
-        if target['preview'] != record['selected']:
-            raise Invalid('Check the latest selected image in the live composer.')
-        group = [target]
-        if platform == 'Instagram' and not (args.facebook_profile or args.facebook_off):
-            raise Invalid('Inspect the Instagram cross-post switch and specify its Facebook profile or --facebook-off.')
-        if platform != 'Instagram' and args.facebook_off:
-            raise Invalid('--facebook-off applies only to the Instagram composer.')
-        if args.facebook_profile:
-            facebook = targets.get('Facebook')
-            if (platform != 'Instagram' or facebook is None
-                    or profile('Facebook', args.facebook_profile) != profile('Facebook', facebook['profile'])):
-                raise Invalid('The Facebook cross-post destination must match the authorized account.')
-            require_phase(facebook, 'ready')
-            require_current_retry_check(facebook, now)
-            group.append(facebook)
-        for item in group:
-            item.update(phase='awaiting_post', attempt_image=record['selected'],
-                        submissions=item['submissions'] + 1, changed_at=now)
+        submit(record, args, platform, target, now)
     target['changed_at'] = now
 
 
@@ -336,7 +482,9 @@ def run(args):
             if args.operation != 'status':
                 if args.version != record['version']:
                     raise Invalid('Recovery state changed. Read status again before acting.')
-                update(record, args, folder, now)
+                changed = update(record, args, folder, now)
+                if changed is False:
+                    return result(record, args.job, folder, now)
                 record['version'] += 1
         response = result(record, args.job, folder, now)
         if not read_only:
@@ -352,13 +500,19 @@ def main(argv=None):
     watch = commands.add_parser('watch', help='Report a stalled browser action independently of its requested timeout')
     watch.add_argument('job')
     watch.add_argument('platform', choices=PLATFORMS)
-    for operation in ('start', 'status', 'select', 'resume', 'attach', 'preview', 'submit', 'observe'):
+    for operation in ('start', 'status', 'select', 'revise', 'approve', 'resume', 'attach', 'preview', 'submit', 'observe'):
         cmd = commands.add_parser(operation)
         cmd.add_argument('job')
         if operation in ('start', 'select'):
             cmd.add_argument('--image', type=Path, required=True)
         if operation == 'start':
             cmd.add_argument('--plan', type=Path, required=True)
+        if operation == 'revise':
+            cmd.add_argument('--plan', type=Path)
+            cmd.add_argument('--image', type=Path)
+            cmd.add_argument('--remove', nargs='+', action='extend', choices=PLATFORMS)
+        if operation == 'approve':
+            cmd.add_argument('platforms', nargs='+', choices=PLATFORMS)
         if operation not in ('start', 'status'):
             cmd.add_argument('--version', type=int, required=True)
         if operation in ('attach', 'preview', 'submit', 'observe'):
@@ -367,6 +521,10 @@ def main(argv=None):
             cmd.add_argument('--profile', required=True)
             cmd.add_argument('--sha256', required=True)
         if operation == 'submit':
+            cmd.add_argument('--confirm-preview', action='store_true',
+                             help='Confirm live final review with user authorization and record the submission attempt')
+            cmd.add_argument('--audience', help='Exact audience label shown by the composer')
+            cmd.add_argument('--facebook-audience', help='Exact audience label shown for the Facebook cross-post')
             cross_post = cmd.add_mutually_exclusive_group()
             cross_post.add_argument('--facebook-profile', help='Facebook profile shown by the authorized Instagram cross-post switch')
             cross_post.add_argument('--facebook-off', action='store_true', help='The Instagram composer shows Facebook sharing off')

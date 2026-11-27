@@ -33,6 +33,11 @@ Image post recovery saves private copies of the selected images, captions,
 account URLs, observations and post links under `image-posts/post-<job>` in
 the local data folder. The assistant kit writes the record before each browser
 attempt, checks the selected file's SHA-256 digest and rejects stale updates.
+The job also holds any saved approvals for a particular account, image, caption
+and audience. A revision can add a destination while another submission is
+pending. The pending attempt and a verified destination's receipt keep their
+original content. One linked submission records both attempts before the
+click. Each destination still needs its own observed post and permalink.
 The assistant supplies live observations through its own browser tools. RES
 cannot independently authenticate the observations or detect an upload made
 outside this workflow. Recovery files stay outside portable JSON backups and

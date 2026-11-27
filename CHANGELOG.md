@@ -1,5 +1,11 @@
 # Changes
 
+## 0.1.0
+
+- Open the RES project in Codex or Claude Code to draft a post or revise a caption in chat. The signed Windows x64 download includes the optional local dashboard.
+- When Instagram sharing to Facebook is on, the assistant shows the linked Facebook profile and audience before you approve. One approval can cover both destinations. Asking for Instagram only turns off sharing for that post.
+- After an interrupted image post, the assistant keeps the selected image and checks each destination separately before retrying.
+
 ## 0.1.0-rc.1 Windows package revision 2
 
 The bundled README now identifies the signed Windows download. The in-app guide and illustrated manual show that notification triage is available in this build.

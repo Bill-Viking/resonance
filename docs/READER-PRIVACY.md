@@ -43,5 +43,5 @@ copies gone. Keep any backup you still need. The current edition has no
 per-source erasure control for the immutable reader history. Portable backups
 are readable JSON, not encrypted archives. No automatic remote backup is made.
 
-This policy describes reader version 0.1.0 and app candidate 0.1.0-rc.1.
+This policy describes reader version 0.1.0 and RES 0.1.0.
 Reader-store publication is still pending.
